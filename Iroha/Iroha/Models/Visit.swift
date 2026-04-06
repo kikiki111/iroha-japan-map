@@ -12,10 +12,13 @@ final class Visit {
     var prefectureName: String
     var date: Date
     var note: String
+    /// v1.1 用。現バージョンでは常に nil。
+    var photoFilename: String?
 
     init(prefectureName: String, date: Date, note: String = "") {
         self.prefectureName = prefectureName
-        self.date = date
-        self.note = note
+        self.date           = date
+        self.note           = note
+        self.photoFilename  = nil
     }
 }
