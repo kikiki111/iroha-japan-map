@@ -17,15 +17,15 @@ struct Trip: Identifiable {
     /// - Note: `TripDetector` always constructs `Trip` with a non-empty `visits` array,
     ///   so the `.distantPast` fallback is purely defensive and should never be reached.
     var startDate: Date {
-        visits.map(\.date).min() ?? .distantPast
+        visits.map(\.startDate).min() ?? .distantPast
     }
 
-    /// The latest visit date.
+    /// The latest visit end date.
     ///
     /// - Note: `TripDetector` always constructs `Trip` with a non-empty `visits` array,
     ///   so the `.distantFuture` fallback is purely defensive and should never be reached.
     var endDate: Date {
-        visits.map(\.date).max() ?? .distantFuture
+        visits.map(\.endDate).max() ?? .distantFuture
     }
 
     /// Unique prefecture names visited on this trip, sorted alphabetically.

@@ -14,15 +14,15 @@ enum TripDetector {
     /// - Parameter visits: An unsorted or sorted list of visits.
     /// - Returns: An array of `Trip` values in chronological order.
     static func detect(from visits: [Visit]) -> [Trip] {
-        let sorted = visits.sorted { $0.date < $1.date }
+        let sorted = visits.sorted { $0.startDate < $1.startDate }
         guard !sorted.isEmpty else { return [] }
 
         var groups: [[Visit]] = []
         var currentGroup: [Visit] = [sorted[0]]
 
         for index in 1..<sorted.count {
-            let previous = sorted[index - 1].date
-            let current  = sorted[index].date
+            let previous = sorted[index - 1].endDate
+            let current  = sorted[index].startDate
             let days = Calendar.current.dateComponents([.day], from: previous, to: current).day
             // Treat a nil result (pathological calendar state) as a trip boundary to
             // avoid silently merging visits whose interval cannot be determined.
@@ -36,7 +36,7 @@ enum TripDetector {
         groups.append(currentGroup)
 
         return groups.map { group -> Trip in
-            let seed = "\(group[0].prefectureName)|\(group[0].date.timeIntervalSinceReferenceDate)"
+            let seed = "\(group[0].prefectureName)|\(group[0].startDate.timeIntervalSinceReferenceDate)"
             let tripID = UUID(uuidString: deterministicUUID(from: seed)) ?? UUID()
             return Trip(id: tripID, visits: group)
         }

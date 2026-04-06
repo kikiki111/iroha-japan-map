@@ -13,7 +13,7 @@ struct TimelineView: View {
     var mapViewModel: MapViewModel
 
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \Visit.date, order: .reverse) private var visits: [Visit]
+    @Query(sort: \Visit.startDate, order: .reverse) private var visits: [Visit]
     @Query(sort: \Prefecture.id) private var prefectures: [Prefecture]
 
     @State private var isShowingAddVisit = false
@@ -30,8 +30,8 @@ struct TimelineView: View {
         let calendar = Calendar.current
         var byYearMonth: [Int: [Int: [Visit]]] = [:]
         for visit in visits {
-            let year  = calendar.component(.year,  from: visit.date)
-            let month = calendar.component(.month, from: visit.date)
+            let year  = calendar.component(.year,  from: visit.startDate)
+            let month = calendar.component(.month, from: visit.startDate)
             byYearMonth[year, default: [:]][month, default: []].append(visit)
         }
         return byYearMonth.keys.sorted(by: >).map { year in
@@ -40,7 +40,7 @@ struct TimelineView: View {
                 MonthGroup(
                     year: year,
                     month: month,
-                    visits: (monthDict[month] ?? []).sorted { $0.date > $1.date }
+                    visits: (monthDict[month] ?? []).sorted { $0.startDate > $1.startDate }
                 )
             }
             return YearGroup(year: year, monthGroups: monthGroups)
@@ -121,7 +121,7 @@ struct TimelineView: View {
 
     private func yearSummary(for year: Int) -> YearSummary {
         let calendar    = Calendar.current
-        let yearVisits  = visits.filter { calendar.component(.year, from: $0.date) == year }
+        let yearVisits  = visits.filter { calendar.component(.year, from: $0.startDate) == year }
         let uniqueNames = Set(yearVisits.map(\.prefectureName))
         let farthest    = uniqueNames
             .compactMap { findPrefecture(byName: $0) }
@@ -220,9 +220,16 @@ private struct VisitRow: View {
                 }
             }
             Spacer()
-            Text(visit.date, style: .date)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            // 同じ日なら1日だけ、複数日なら「〜」でつなぐ
+            Group {
+                if Calendar.current.isDate(visit.startDate, inSameDayAs: visit.endDate) {
+                    Text(visit.startDate, style: .date)
+                } else {
+                    Text("\(visit.startDate.formatted(.dateTime.month().day())) 〜 \(visit.endDate.formatted(.dateTime.month().day()))")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
     }
@@ -239,7 +246,8 @@ struct AddVisitView: View {
     @Query(sort: \Prefecture.id) private var prefectures: [Prefecture]
 
     @State private var selectedPrefectureName = ""
-    @State private var date = Date()
+    @State private var startDate = Date()
+    @State private var endDate = Date()
     @State private var note = ""
 
     var body: some View {
@@ -254,9 +262,13 @@ struct AddVisitView: View {
                     .pickerStyle(.wheel)
                 }
 
-                Section("日付") {
-                    DatePicker("日付", selection: $date, displayedComponents: .date)
-                        .datePickerStyle(.compact)
+                Section("旅行期間") {
+                    DatePicker("出発日", selection: $startDate, displayedComponents: .date)
+                        .environment(\.locale, Locale(identifier: "ja_JP"))
+                        .onChange(of: startDate) {
+                            if endDate < startDate { endDate = startDate }
+                        }
+                    DatePicker("帰着日", selection: $endDate, in: startDate..., displayedComponents: .date)
                         .environment(\.locale, Locale(identifier: "ja_JP"))
                 }
 
@@ -286,7 +298,7 @@ struct AddVisitView: View {
     }
 
     private func save() {
-        let visit = Visit(prefectureName: selectedPrefectureName, date: date, note: note)
+        let visit = Visit(prefectureName: selectedPrefectureName, startDate: startDate, endDate: endDate, note: note)
         visit.prefecture = prefectures.first { $0.name == selectedPrefectureName }
         modelContext.insert(visit)
         dismiss()
