@@ -161,7 +161,7 @@ struct StatisticsTabView: View {
                     y: .value("県数", point.count)
                 )
                 .foregroundStyle(Color(hex: "#7F77DD"))
-                .interpolationMethod(.monotone)
+                .interpolationMethod(.linear)
                 .lineStyle(StrokeStyle(lineWidth: 2.5))
 
                 AreaMark(
@@ -175,7 +175,7 @@ struct StatisticsTabView: View {
                         endPoint: .bottom
                     )
                 )
-                .interpolationMethod(.monotone)
+                .interpolationMethod(.linear)
 
                 PointMark(
                     x: .value("日付", point.date),
