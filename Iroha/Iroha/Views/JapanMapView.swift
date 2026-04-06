@@ -5,56 +5,88 @@
 
 import SwiftUI
 import SwiftData
+import CoreLocation
 
-/// 日本地図グリッド（NavigationStack は親 View が管理する）
-/// MapViewModel.focusedPrefecture の変化を受けてハイライト表示する
+/// GeoJSON を SwiftUI Canvas に描画する日本地図ビュー。
+/// 都道府県をタップすると MapViewModel にフォーカスを設定する。
 struct JapanMapView: View {
     var mapViewModel: MapViewModel
 
     @Query(sort: \Prefecture.id) private var prefectures: [Prefecture]
+    @State private var geoShapes: [PrefectureShape] = []
+
+    // Mercator 投影の縦横比 (width / height) ≈ Δλ_rad / ΔmercY
+    private static let mapAspectRatio: CGFloat = 0.92
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 80))], spacing: 8) {
-            ForEach(prefectures) { prefecture in
-                PrefectureCell(
-                    prefecture: prefecture,
-                    isVisited: prefecture.isVisited,
-                    isFocused: mapViewModel.focusedPrefecture?.name == prefecture.name
-                )
+        GeometryReader { geo in
+            Canvas { context, size in
+                drawMap(context: context, size: size)
+            }
+            .gesture(
+                SpatialTapGesture()
+                    .onEnded { value in
+                        let rect = CGRect(origin: .zero, size: geo.size)
+                        guard let shape = MapProjection.prefecture(
+                            at: value.location, in: rect, shapes: geoShapes
+                        ) else { return }
+                        if let pref = prefectures.first(where: { $0.name == shape.name }) {
+                            mapViewModel.focus(prefecture: pref)
+                        }
+                    }
+            )
+        }
+        .aspectRatio(Self.mapAspectRatio, contentMode: .fit)
+        .onAppear { loadShapes() }
+    }
+
+    // MARK: - Drawing
+
+    private func drawMap(context: GraphicsContext, size: CGSize) {
+        let rect = CGRect(origin: .zero, size: size)
+        let prefMap = Dictionary(uniqueKeysWithValues: prefectures.map { ($0.name, $0) })
+
+        for shape in geoShapes {
+            let pref = prefMap[shape.name]
+            let isFocused = mapViewModel.focusedPrefecture?.name == shape.name
+
+            let fillColor: Color
+            if isFocused {
+                fillColor = .orange
+            } else if let pref {
+                fillColor = mapViewModel.color(for: pref, allPrefectures: prefectures)
+            } else {
+                fillColor = Color(hex: "#DDDAD4")
+            }
+
+            for rings in shape.polygons {
+                let path = buildPath(rings: rings, in: rect)
+                context.fill(Path(path), with: .color(fillColor))
+                context.stroke(Path(path), with: .color(.white.opacity(0.8)), lineWidth: 0.5)
             }
         }
-        .padding()
-    }
-}
-
-// MARK: - PrefectureCell
-
-private struct PrefectureCell: View {
-    let prefecture: Prefecture
-    let isVisited: Bool
-    let isFocused: Bool
-
-    var body: some View {
-        Text(prefecture.name)
-            .font(.caption2)
-            .lineLimit(1)
-            .minimumScaleFactor(0.5)
-            .frame(maxWidth: .infinity, minHeight: 40)
-            .padding(4)
-            .background(background)
-            .foregroundStyle(isFocused ? Color.white : (isVisited ? Color.primary : Color.secondary))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(isFocused ? Color.orange : Color.clear, lineWidth: 2)
-            )
-            .scaleEffect(isFocused ? 1.1 : 1.0)
-            .animation(.spring(duration: 0.25), value: isFocused)
     }
 
-    private var background: Color {
-        if isFocused { return .orange }
-        return prefecture.visitColor()
+    private func buildPath(
+        rings: [[CLLocationCoordinate2D]],
+        in rect: CGRect
+    ) -> CGPath {
+        let path = CGMutablePath()
+        for ring in rings {
+            let pts = ring.map { MapProjection.project($0, in: rect) }
+            guard let first = pts.first else { continue }
+            path.move(to: first)
+            path.addLines(between: Array(pts.dropFirst()))
+            path.closeSubpath()
+        }
+        return path
+    }
+
+    // MARK: - Data Loading
+
+    private func loadShapes() {
+        guard geoShapes.isEmpty else { return }
+        geoShapes = (try? GeoJSONParser.loadPrefectures()) ?? []
     }
 }
 
@@ -64,6 +96,7 @@ private struct PrefectureCell: View {
     @Previewable @State var vm = MapViewModel()
     ScrollView {
         JapanMapView(mapViewModel: vm)
+            .padding()
     }
     .modelContainer(for: [Prefecture.self, Visit.self], inMemory: true)
 }
