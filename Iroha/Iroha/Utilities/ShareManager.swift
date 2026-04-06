@@ -87,7 +87,7 @@ private struct MapSnapshotView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(16)
-        .background(Color(.systemBackground))
+        .background(Color.irohaBackground)
         .frame(width: gridWidth + 32)
     }
 }
@@ -104,7 +104,7 @@ private struct SnapshotCell: View {
             .minimumScaleFactor(0.5)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(prefecture.visitColor())
-            .foregroundStyle(prefecture.isVisited ? Color.white : Color(hex: "#555555"))
+            .foregroundStyle(prefecture.isVisited ? Color.white : Color.irohaText)
             .clipShape(RoundedRectangle(cornerRadius: 3))
     }
 }

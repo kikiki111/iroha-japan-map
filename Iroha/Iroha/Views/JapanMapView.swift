@@ -17,6 +17,8 @@ struct JapanMapView: View {
         JapanMapWebViewWrapper(prefectures: prefectures, mapViewModel: mapViewModel)
             .aspectRatio(0.9, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: 8))
+            .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
+            .scaleEffect(mapViewModel.mapScale)
     }
 }
 

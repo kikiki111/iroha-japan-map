@@ -26,6 +26,17 @@ extension Color {
     }
 }
 
+// MARK: - Iroha theme colors
+
+extension Color {
+    /// アプリ全体の背景色（オフホワイト）
+    static let irohaBackground = Color(hex: "#FAF9F7")
+    /// アプリ全体のテキスト色（ダークネイビー）
+    static let irohaText = Color(hex: "#2C2A4A")
+    /// マイルストーンフラッシュ色
+    static let irohaFlash = Color(hex: "#AFA9EC")
+}
+
 // MARK: - Prefecture color
 
 extension Prefecture {

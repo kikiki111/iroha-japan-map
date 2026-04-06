@@ -198,7 +198,7 @@ struct YearHeaderView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
         .textCase(nil)
     }
 }
@@ -231,7 +231,7 @@ private struct VisitRow: View {
             .font(.caption)
             .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 6)
     }
 }
 

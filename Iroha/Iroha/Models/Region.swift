@@ -31,14 +31,14 @@ enum Region: String, Codable, CaseIterable {
     /// 地方ごとの代表色
     var color: Color {
         switch self {
-        case .hokkaido: return Color(hex: "#5B9BD5")
-        case .tohoku:   return Color(hex: "#70AD47")
-        case .kanto:    return Color(hex: "#FF7043")
-        case .chubu:    return Color(hex: "#8D6E63")
-        case .kinki:    return Color(hex: "#FFA726")
-        case .chugoku:  return Color(hex: "#26A69A")
-        case .shikoku:  return Color(hex: "#9CCC65")
-        case .kyushu:   return Color(hex: "#EF5350")
+        case .hokkaido: return Color(hex: "#7F77DD")
+        case .tohoku:   return Color(hex: "#8F87DD")
+        case .kanto:    return Color(hex: "#9F97DD")
+        case .chubu:    return Color(hex: "#AFA9EC")
+        case .kinki:    return Color(hex: "#BFBBF0")
+        case .chugoku:  return Color(hex: "#CFCDF4")
+        case .shikoku:  return Color(hex: "#DFDDF8")
+        case .kyushu:   return Color(hex: "#EFEDFB")
         }
     }
 }

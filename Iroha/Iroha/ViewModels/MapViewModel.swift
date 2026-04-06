@@ -5,12 +5,34 @@
 
 import SwiftUI
 
+// MARK: - MilestoneType
+
+/// マイルストーンアニメーションの種類
+enum MilestoneType: Equatable {
+    /// 初訪問（0→1）
+    case firstVisit(prefectureCode: Int)
+    /// 半分制覇（25県）
+    case halfConquest
+    /// 地方制覇
+    case regionConquest(Region)
+    /// 全国制覇（47県）
+    case nationalConquest
+}
+
+// MARK: - MapViewModel
+
 /// 地図と他の画面を連携させるビューモデル
 @Observable
 @MainActor
 final class MapViewModel {
     /// 現在フォーカスされている都道府県（シートバインディング用に読み書き可能）
     var focusedPrefecture: Prefecture?
+
+    /// 現在実行中のマイルストーンアニメーション
+    var pendingMilestone: MilestoneType?
+
+    /// 地図のスケール（半分制覇アニメーション用）
+    var mapScale: CGFloat = 1.0
 
     // MARK: - Focus
 
@@ -33,6 +55,52 @@ final class MapViewModel {
     func color(for prefecture: Prefecture, allPrefectures: [Prefecture]) -> Color {
         if isAllVisited(prefectures: allPrefectures) { return Color(hex: "#534AB7") }
         return prefecture.visitColor()
+    }
+
+    // MARK: - Milestone Detection
+
+    /// 訪問保存後にマイルストーンを検出する。
+    func detectMilestone(
+        oldVisitedCount: Int,
+        oldRegionCounts: [Region: Int],
+        prefectures: [Prefecture]
+    ) {
+        let newVisitedCount = visitedPrefectureCount(prefectures: prefectures)
+
+        // 優先度: national > half > region > first
+        if newVisitedCount == 47, !milestoneShown("milestone_47_shown") {
+            markMilestoneShown("milestone_47_shown")
+            pendingMilestone = .nationalConquest
+            return
+        }
+
+        if newVisitedCount >= 25, oldVisitedCount < 25, !milestoneShown("milestone_25_shown") {
+            markMilestoneShown("milestone_25_shown")
+            pendingMilestone = .halfConquest
+            return
+        }
+
+        let newRegionCounts = regionVisitedCounts(prefectures: prefectures)
+        let totals = regionTotalCounts(prefectures: prefectures)
+        for region in Region.allCases {
+            let oldCount = oldRegionCounts[region] ?? 0
+            let newCount = newRegionCounts[region] ?? 0
+            let total = totals[region] ?? 0
+            if total > 0, newCount == total, oldCount < total {
+                let key = "region_\(region.rawValue)_shown"
+                if !milestoneShown(key) {
+                    markMilestoneShown(key)
+                    pendingMilestone = .regionConquest(region)
+                    return
+                }
+            }
+        }
+
+        if newVisitedCount > oldVisitedCount {
+            if let newlyVisited = prefectures.first(where: { $0.visitCount == 1 }) {
+                pendingMilestone = .firstVisit(prefectureCode: newlyVisited.id)
+            }
+        }
     }
 
     // MARK: - Statistics
@@ -71,5 +139,33 @@ final class MapViewModel {
                 total: group.count
             )
         }
+    }
+
+    /// 地方ごとの訪問済み都道府県数
+    func regionVisitedCounts(prefectures: [Prefecture]) -> [Region: Int] {
+        var result: [Region: Int] = [:]
+        for region in Region.allCases {
+            result[region] = prefectures.filter { $0.region == region && $0.isVisited }.count
+        }
+        return result
+    }
+
+    /// 地方ごとの都道府県総数
+    func regionTotalCounts(prefectures: [Prefecture]) -> [Region: Int] {
+        var result: [Region: Int] = [:]
+        for region in Region.allCases {
+            result[region] = prefectures.filter { $0.region == region }.count
+        }
+        return result
+    }
+
+    // MARK: - Private
+
+    private func milestoneShown(_ key: String) -> Bool {
+        UserDefaults.standard.bool(forKey: key)
+    }
+
+    private func markMilestoneShown(_ key: String) {
+        UserDefaults.standard.set(true, forKey: key)
     }
 }

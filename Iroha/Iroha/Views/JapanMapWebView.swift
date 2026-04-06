@@ -47,6 +47,24 @@ final class JapanMapWKWebView: WKWebView {
         if isPageLoaded { applyUpdates() }
     }
 
+    /// 地方制覇アニメーション：指定都道府県を一時的にフラッシュ
+    func flashPrefectures(codes: [Int], color: String, durationMs: Int, originalColors: [String: String]) {
+        guard isPageLoaded else { return }
+        let codesJSON = codes.map { "\($0)" }.joined(separator: ",")
+        guard let origData = try? JSONSerialization.data(withJSONObject: originalColors),
+              let origString = String(data: origData, encoding: .utf8) else { return }
+        let js = "flashPrefectures([\(codesJSON)], '\(color)', \(durationMs), \(origString));"
+        evaluateJavaScript(js, completionHandler: nil)
+    }
+
+    /// 全国制覇アニメーション：北→南ウェーブ
+    func waveAnimation(codes: [Int], color: String, totalDurationSec: Double) {
+        guard isPageLoaded else { return }
+        let codesJSON = codes.map { "\($0)" }.joined(separator: ",")
+        let js = "waveAnimation([\(codesJSON)], '\(color)', \(totalDurationSec));"
+        evaluateJavaScript(js, completionHandler: nil)
+    }
+
     // MARK: - Private
 
     private func loadMapHTML() {
@@ -92,6 +110,7 @@ final class JapanMapWKWebView: WKWebView {
             stroke: white;
             stroke-width: 0.6;
             cursor: pointer;
+            transition: fill 0.4s ease-in-out;
         }
         </style>
         </head>
@@ -136,6 +155,28 @@ final class JapanMapWKWebView: WKWebView {
                         el.style.strokeWidth = '2.5';
                     }
                 }
+            };
+            window.flashPrefectures = function(codes, color, durationMs, originalColors) {
+                codes.forEach(function(code) {
+                    var el = document.querySelector('[data-code="' + code + '"]');
+                    if (el) el.style.fill = color;
+                });
+                setTimeout(function() {
+                    codes.forEach(function(code) {
+                        var el = document.querySelector('[data-code="' + code + '"]');
+                        if (el && originalColors[code]) el.style.fill = originalColors[code];
+                    });
+                }, durationMs);
+            };
+            window.waveAnimation = function(codes, color, totalDurationSec) {
+                var count = codes.length;
+                codes.forEach(function(code, index) {
+                    var delay = (index / count) * totalDurationSec * 1000;
+                    setTimeout(function() {
+                        var el = document.querySelector('[data-code="' + code + '"]');
+                        if (el) el.style.fill = color;
+                    }, delay);
+                });
             };
             if (document.readyState === 'loading') {
                 document.addEventListener('DOMContentLoaded', setup);
@@ -186,9 +227,14 @@ struct JapanMapWebViewWrapper: UIViewRepresentable {
     let prefectures: [Prefecture]
     var mapViewModel: MapViewModel
 
+    final class Coordinator {
+        var lastExecutedMilestone: MilestoneType?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeUIView(context: Context) -> JapanMapWKWebView {
-        let webView = JapanMapWKWebView()
-        return webView
+        JapanMapWKWebView()
     }
 
     func updateUIView(_ webView: JapanMapWKWebView, context: Context) {
@@ -197,8 +243,35 @@ struct JapanMapWebViewWrapper: UIViewRepresentable {
             guard let pref = prefectures.first(where: { $0.id == code }) else { return }
             mapViewModel.focus(prefecture: pref)
         }
+        // 色更新
         webView.updateColors(buildColorMap())
         webView.updateHighlight(mapViewModel.focusedPrefecture?.id)
+
+        // マイルストーンアニメーション（重複実行防止）
+        if let milestone = mapViewModel.pendingMilestone,
+           context.coordinator.lastExecutedMilestone != milestone {
+            context.coordinator.lastExecutedMilestone = milestone
+
+            switch milestone {
+            case .regionConquest(let region):
+                let codes = prefectures.filter { $0.region == region }.map(\.id)
+                var originalColors: [String: String] = [:]
+                for code in codes {
+                    let hex = prefectures.first(where: { $0.id == code })?.visitColorHex() ?? "#DDDAD4"
+                    originalColors["\(code)"] = hex
+                }
+                webView.flashPrefectures(codes: codes, color: "#AFA9EC", durationMs: 300, originalColors: originalColors)
+
+            case .nationalConquest:
+                let sortedCodes = prefectures
+                    .sorted { $0.latitude > $1.latitude }
+                    .map(\.id)
+                webView.waveAnimation(codes: sortedCodes, color: "#534AB7", totalDurationSec: 3.0)
+
+            default:
+                break // firstVisit は CSS transition、halfConquest は SwiftUI scaleEffect で処理
+            }
+        }
     }
 
     // MARK: - Color map
