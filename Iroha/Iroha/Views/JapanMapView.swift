@@ -6,7 +6,7 @@
 import SwiftUI
 import SwiftData
 
-/// 日本地図ビュー
+/// 日本地図グリッド（NavigationStack は親 View が管理する）
 /// MapViewModel.focusedPrefecture の変化を受けてハイライト表示する
 struct JapanMapView: View {
     var mapViewModel: MapViewModel
@@ -14,32 +14,16 @@ struct JapanMapView: View {
     @Query(sort: \Prefecture.id) private var prefectures: [Prefecture]
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 80))], spacing: 8) {
-                        ForEach(prefectures) { prefecture in
-                            PrefectureCell(
-                                prefecture: prefecture,
-                                isVisited: prefecture.isVisited,
-                                isFocused: mapViewModel.focusedPrefecture?.name == prefecture.name
-                            )
-                        }
-                    }
-                    .padding()
-                }
-            }
-            .navigationTitle("日本地図")
-            .toolbar {
-                if mapViewModel.focusedPrefecture != nil {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button("クリア") {
-                            mapViewModel.clearFocus()
-                        }
-                    }
-                }
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 80))], spacing: 8) {
+            ForEach(prefectures) { prefecture in
+                PrefectureCell(
+                    prefecture: prefecture,
+                    isVisited: prefecture.isVisited,
+                    isFocused: mapViewModel.focusedPrefecture?.name == prefecture.name
+                )
             }
         }
+        .padding()
     }
 }
 
@@ -72,4 +56,14 @@ private struct PrefectureCell: View {
         if isFocused { return .orange }
         return prefecture.visitColor()
     }
+}
+
+// MARK: - Preview
+
+#Preview {
+    @Previewable @State var vm = MapViewModel()
+    ScrollView {
+        JapanMapView(mapViewModel: vm)
+    }
+    .modelContainer(for: [Prefecture.self, Visit.self], inMemory: true)
 }

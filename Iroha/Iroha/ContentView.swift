@@ -13,18 +13,60 @@ struct ContentView: View {
 
     var body: some View {
         TabView {
-            JapanMapView(mapViewModel: mapViewModel)
-                .tabItem {
-                    Label("地図", systemImage: "map")
-                }
+            MapTabView(mapViewModel: mapViewModel)
+                .tabItem { Label("地図", systemImage: "map") }
 
             TimelineView(mapViewModel: mapViewModel)
-                .tabItem {
-                    Label("タイムライン", systemImage: "clock")
-                }
+                .tabItem { Label("履歴", systemImage: "clock") }
         }
     }
 }
+
+// MARK: - MapTabView
+
+/// 地図タブ：StatsBarView + JapanMapView を NavigationStack でまとめ、シェアボタンを配置
+private struct MapTabView: View {
+    var mapViewModel: MapViewModel
+
+    @Query(sort: \Prefecture.id) private var prefectures: [Prefecture]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 12) {
+                    StatsBarView(mapViewModel: mapViewModel)
+                    JapanMapView(mapViewModel: mapViewModel)
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
+            }
+            .navigationTitle("地図")
+            .toolbar { toolbarContent }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Button {
+                ShareManager.shareMap(prefectures: prefectures)
+            } label: {
+                Label("シェア", systemImage: "square.and.arrow.up")
+            }
+            .accessibilityLabel("地図をシェア")
+        }
+        if mapViewModel.focusedPrefecture != nil {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button("クリア") {
+                    mapViewModel.clearFocus()
+                }
+                .accessibilityLabel("フォーカスをクリア")
+            }
+        }
+    }
+}
+
+// MARK: - Preview
 
 #Preview {
     ContentView()
