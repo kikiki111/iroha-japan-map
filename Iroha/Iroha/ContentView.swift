@@ -9,72 +9,66 @@ import SwiftUI
 import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @State private var mapViewModel = MapViewModel()
 
     var body: some View {
-        NavigationViewWrapper {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
+        TabView {
+            MapTabView(mapViewModel: mapViewModel)
+                .tabItem { Label("地図", systemImage: "map") }
+
+            TimelineView(mapViewModel: mapViewModel)
+                .tabItem { Label("履歴", systemImage: "clock") }
+        }
+    }
+}
+
+// MARK: - MapTabView
+
+/// 地図タブ：StatsBarView + JapanMapView を NavigationStack でまとめ、シェアボタンを配置
+private struct MapTabView: View {
+    var mapViewModel: MapViewModel
+
+    @Query(sort: \Prefecture.id) private var prefectures: [Prefecture]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 12) {
+                    StatsBarView(mapViewModel: mapViewModel)
+                    JapanMapView(mapViewModel: mapViewModel)
                 }
-                .onDelete(perform: deleteItems)
+                .padding(.horizontal)
+                .padding(.top, 8)
             }
-#if os(macOS)
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200)
-#endif
-            .toolbar {
-#if os(iOS)
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-#endif
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
-            }
+            .navigationTitle("地図")
+            .toolbar { toolbarContent }
         }
     }
 
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarTrailing) {
+            Button {
+                ShareManager.shareMap(prefectures: prefectures)
+            } label: {
+                Label("シェア", systemImage: "square.and.arrow.up")
+            }
+            .accessibilityLabel("地図をシェア")
         }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
+        if mapViewModel.focusedPrefecture != nil {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button("クリア") {
+                    mapViewModel.clearFocus()
+                }
+                .accessibilityLabel("フォーカスをクリア")
             }
         }
     }
 }
 
-fileprivate struct NavigationViewWrapper<Content: View>: View {
-    let content: () -> Content
-
-    var body: some View {
-#if os(macOS)
-        NavigationSplitView {
-            content()
-        } detail: {
-            Text("Select an item")
-        }
-#else
-        content()
-#endif
-    }
-}
+// MARK: - Preview
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+        .modelContainer(for: [Prefecture.self, Visit.self], inMemory: true)
 }

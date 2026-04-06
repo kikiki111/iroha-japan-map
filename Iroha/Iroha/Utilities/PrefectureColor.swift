@@ -1,0 +1,52 @@
+//
+//  PrefectureColor.swift
+//  Iroha
+//
+
+import SwiftUI
+
+// MARK: - Color(hex:) initializer
+
+extension Color {
+    init(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&int)
+
+        let r, g, b: Double
+        switch hex.count {
+        case 6:
+            r = Double((int >> 16) & 0xFF) / 255
+            g = Double((int >> 8)  & 0xFF) / 255
+            b = Double(int         & 0xFF) / 255
+        default:
+            r = 0; g = 0; b = 0
+        }
+        self.init(red: r, green: g, blue: b)
+    }
+}
+
+// MARK: - Visit color constants
+
+private extension Color {
+    static let visitNone    = Color(hex: "#DDDAD4")
+    static let visitLight   = Color(hex: "#C8C4F0")
+    static let visitMedium  = Color(hex: "#9F97DD")
+    static let visitDeep    = Color(hex: "#7F77DD")
+    static let visitDarkest = Color(hex: "#534AB7")
+}
+
+// MARK: - Prefecture color
+
+extension Prefecture {
+    /// visitCount に応じた塗りつぶし色を返す。
+    func visitColor() -> Color {
+        switch visitCount {
+        case 0:    return .visitNone
+        case 1:    return .visitLight
+        case 2:    return .visitMedium
+        case 3, 4: return .visitDeep
+        default:   return .visitDarkest
+        }
+    }
+}
