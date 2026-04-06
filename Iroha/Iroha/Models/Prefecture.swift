@@ -89,7 +89,7 @@ struct Prefecture: Identifiable, Hashable, Sendable {
 
 private func haversineDistance(lat1: Double, lon1: Double,
                                lat2: Double, lon2: Double) -> Double {
-    let r = 6_371_000.0  // Earth radius in metres
+    let r = 6_371_000.0  // Earth radius in meters
     let dLat = (lat2 - lat1) * .pi / 180
     let dLon = (lon2 - lon1) * .pi / 180
     let a = sin(dLat / 2) * sin(dLat / 2)

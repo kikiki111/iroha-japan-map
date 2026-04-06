@@ -6,8 +6,12 @@
 import Foundation
 
 /// 連続する訪問をまとめた旅行グループ
+///
+/// `TripDetector.detect(from:)` は空の `visits` を持つ `Trip` を生成しないため、
+/// `startDate` / `endDate` の計算は常に有効な値を返す。
 struct Trip: Identifiable {
     let id: UUID
+    /// グループ内の訪問一覧（1件以上）
     let visits: [Visit]
 
     /// 旅行の開始日（最も早い訪問日）

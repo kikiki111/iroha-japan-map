@@ -45,6 +45,6 @@ enum TripDetector {
     private static func daysBetween(_ from: Date, and to: Date) -> Int {
         let calendar = Calendar.current
         let components = calendar.dateComponents([.day], from: from, to: to)
-        return abs(components.day ?? 0)
+        return components.day ?? 0
     }
 }
