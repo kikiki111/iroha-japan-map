@@ -132,7 +132,7 @@ final class JapanMapWKWebView: WKWebView {
                 if (code !== null && code !== undefined) {
                     var el = document.querySelector('[data-code="' + code + '"]');
                     if (el) {
-                        el.style.stroke = '#FF6B00';
+                        el.style.stroke = '#7F77DD';
                         el.style.strokeWidth = '2.5';
                     }
                 }
