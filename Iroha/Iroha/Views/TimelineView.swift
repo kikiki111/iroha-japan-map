@@ -17,6 +17,7 @@ struct TimelineView: View {
     @Query(sort: \Prefecture.id) private var prefectures: [Prefecture]
 
     @State private var isShowingAddVisit = false
+    @State private var selectedVisit: Visit?
 
     // MARK: - Prefecture lookup
 
@@ -71,6 +72,10 @@ struct TimelineView: View {
             .sheet(isPresented: $isShowingAddVisit) {
                 AddVisitView()
             }
+            .sheet(item: $selectedVisit) { visit in
+                VisitDetailView(visit: visit)
+                    .presentationDetents([.medium])
+            }
         }
     }
 
@@ -91,9 +96,7 @@ struct TimelineView: View {
                             VisitRow(visit: visit)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
-                                    if let pref = findPrefecture(byName: visit.prefectureName) {
-                                        mapViewModel.focus(prefecture: pref)
-                                    }
+                                    selectedVisit = visit
                                 }
                         }
                         .onDelete { offsets in deleteVisits(offsets, from: monthGroup.visits) }
@@ -155,17 +158,7 @@ private struct MonthGroup: Identifiable {
     var id: String { "\(year)-\(month)" }
 
     var label: String {
-        var components   = DateComponents()
-        components.year  = year
-        components.month = month
-        components.day   = 1
-        guard let date = Calendar.current.date(from: components) else {
-            return "\(year)年\(month)月"
-        }
-        let formatter        = DateFormatter()
-        formatter.locale     = Locale(identifier: "ja_JP")
-        formatter.dateFormat = "M月"
-        return formatter.string(from: date)
+        "\(month)月"
     }
 }
 
@@ -175,6 +168,22 @@ struct YearSummary {
     let farthestPrefectureName: String?
 }
 
+// MARK: - Date formatting
+
+private let jaDateFormatter: DateFormatter = {
+    let f = DateFormatter()
+    f.locale = Locale(identifier: "ja_JP")
+    f.dateFormat = "M/d"
+    return f
+}()
+
+private let jaSingleDateFormatter: DateFormatter = {
+    let f = DateFormatter()
+    f.locale = Locale(identifier: "ja_JP")
+    f.dateFormat = "M月d日"
+    return f
+}()
+
 // MARK: - YearHeaderView
 
 struct YearHeaderView: View {
@@ -183,7 +192,7 @@ struct YearHeaderView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("\(year)年")
+            Text(verbatim: "\(year)年")
                 .font(.title2)
                 .fontWeight(.bold)
                 .foregroundStyle(.primary)
@@ -220,18 +229,68 @@ private struct VisitRow: View {
                 }
             }
             Spacer()
-            // 同じ日なら1日だけ、複数日なら「〜」でつなぐ
-            Group {
-                if Calendar.current.isDate(visit.startDate, inSameDayAs: visit.effectiveEndDate) {
-                    Text(visit.startDate, style: .date)
-                } else {
-                    Text("\(visit.startDate.formatted(.dateTime.month().day())) 〜 \(visit.effectiveEndDate.formatted(.dateTime.month().day()))")
-                }
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            Text(dateLabel)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .padding(.vertical, 6)
+    }
+
+    private var dateLabel: String {
+        if Calendar.current.isDate(visit.startDate, inSameDayAs: visit.effectiveEndDate) {
+            return jaSingleDateFormatter.string(from: visit.startDate)
+        }
+        return "\(jaDateFormatter.string(from: visit.startDate))〜\(jaDateFormatter.string(from: visit.effectiveEndDate))"
+    }
+}
+
+// MARK: - VisitDetailView
+
+/// 訪問記録の詳細を表示するシート
+struct VisitDetailView: View {
+    let visit: Visit
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    HStack {
+                        Text("都道府県")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(visit.prefectureName)
+                    }
+                    HStack {
+                        Text("出発日")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(jaSingleDateFormatter.string(from: visit.startDate))
+                    }
+                    if let endDate = visit.endDate {
+                        HStack {
+                            Text("帰着日")
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(jaSingleDateFormatter.string(from: endDate))
+                        }
+                    }
+                }
+                if !visit.note.isEmpty {
+                    Section("メモ") {
+                        Text(visit.note)
+                    }
+                }
+            }
+            .navigationTitle("旅の記録")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("閉じる") { dismiss() }
+                }
+            }
+        }
     }
 }
 
@@ -246,8 +305,7 @@ struct AddVisitView: View {
     @Query(sort: \Prefecture.id) private var prefectures: [Prefecture]
 
     @State private var selectedPrefectureName = ""
-    @State private var startDate = Date()
-    @State private var endDate = Date()
+    @State private var travelDates: Set<DateComponents> = []
     @State private var note = ""
 
     var body: some View {
@@ -262,13 +320,8 @@ struct AddVisitView: View {
                     .pickerStyle(.wheel)
                 }
 
-                Section("旅行期間") {
-                    DatePicker("出発日", selection: $startDate, displayedComponents: .date)
-                        .environment(\.locale, Locale(identifier: "ja_JP"))
-                        .onChange(of: startDate) {
-                            if endDate < startDate { endDate = startDate }
-                        }
-                    DatePicker("帰着日", selection: $endDate, in: startDate..., displayedComponents: .date)
+                Section("旅行日（複数選択可）") {
+                    MultiDatePicker("旅行日を選択", selection: $travelDates)
                         .environment(\.locale, Locale(identifier: "ja_JP"))
                 }
 
@@ -282,6 +335,11 @@ struct AddVisitView: View {
                 } else if selectedPrefectureName.isEmpty, let first = prefectures.first {
                     selectedPrefectureName = first.name
                 }
+                // デフォルトで今日を選択
+                if travelDates.isEmpty {
+                    let today = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+                    travelDates = [today]
+                }
             }
             .navigationTitle("訪問を追加")
             .navigationBarTitleDisplayMode(.inline)
@@ -291,15 +349,24 @@ struct AddVisitView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") { save() }
-                        .disabled(selectedPrefectureName.isEmpty)
+                        .disabled(selectedPrefectureName.isEmpty || travelDates.isEmpty)
                 }
             }
         }
     }
 
     private func save() {
-        let effectiveEnd = Calendar.current.isDate(startDate, inSameDayAs: endDate) ? nil : endDate
-        let visit = Visit(prefectureName: selectedPrefectureName, startDate: startDate, endDate: effectiveEnd, note: note)
+        let calendar = Calendar.current
+        let sortedDates = travelDates.compactMap { calendar.date(from: $0) }.sorted()
+        guard let startDate = sortedDates.first else { return }
+        let endDate = sortedDates.count > 1 ? sortedDates.last : nil
+
+        let visit = Visit(
+            prefectureName: selectedPrefectureName,
+            startDate: startDate,
+            endDate: endDate,
+            note: note
+        )
         visit.prefecture = prefectures.first { $0.name == selectedPrefectureName }
         modelContext.insert(visit)
         dismiss()

@@ -39,14 +39,14 @@ private struct MapTabView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 12) {
-                    StatsBarView(mapViewModel: mapViewModel)
                     JapanMapView(mapViewModel: mapViewModel)
+                    StatsBarView(mapViewModel: mapViewModel)
                 }
                 .padding(.horizontal)
                 .padding(.top, 8)
             }
             .background(Color.irohaBackground)
-            .navigationTitle("地図")
+            .navigationTitle("いろは")
             .toolbar { toolbarContent }
             .sheet(item: $mapViewModel.focusedPrefecture) { prefecture in
                 AddVisitView(initialPrefectureName: prefecture.name)
