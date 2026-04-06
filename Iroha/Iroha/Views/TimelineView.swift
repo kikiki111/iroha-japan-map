@@ -230,7 +230,9 @@ private struct VisitRow: View {
 
 // MARK: - AddVisitView
 
-private struct AddVisitView: View {
+struct AddVisitView: View {
+    var initialPrefectureName: String = ""
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
@@ -263,7 +265,9 @@ private struct AddVisitView: View {
                 }
             }
             .onAppear {
-                if selectedPrefectureName.isEmpty, let first = prefectures.first {
+                if !initialPrefectureName.isEmpty {
+                    selectedPrefectureName = initialPrefectureName
+                } else if selectedPrefectureName.isEmpty, let first = prefectures.first {
                     selectedPrefectureName = first.name
                 }
             }

@@ -9,8 +9,8 @@ import SwiftUI
 @Observable
 @MainActor
 final class MapViewModel {
-    /// 現在フォーカスされている都道府県
-    private(set) var focusedPrefecture: Prefecture?
+    /// 現在フォーカスされている都道府県（シートバインディング用に読み書き可能）
+    var focusedPrefecture: Prefecture?
 
     // MARK: - Focus
 

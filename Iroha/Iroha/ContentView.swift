@@ -19,6 +19,7 @@ struct ContentView: View {
             TimelineView(mapViewModel: mapViewModel)
                 .tabItem { Label("履歴", systemImage: "clock") }
         }
+        .tint(Color(hex: "#7F77DD"))
     }
 }
 
@@ -26,7 +27,7 @@ struct ContentView: View {
 
 /// 地図タブ：StatsBarView + JapanMapView を NavigationStack でまとめ、シェアボタンを配置
 private struct MapTabView: View {
-    var mapViewModel: MapViewModel
+    @Bindable var mapViewModel: MapViewModel
 
     @Query(sort: \Prefecture.id) private var prefectures: [Prefecture]
 
@@ -42,6 +43,10 @@ private struct MapTabView: View {
             }
             .navigationTitle("地図")
             .toolbar { toolbarContent }
+            .sheet(item: $mapViewModel.focusedPrefecture) { prefecture in
+                AddVisitView(initialPrefectureName: prefecture.name)
+                    .presentationDetents([.medium, .large])
+            }
         }
     }
 
