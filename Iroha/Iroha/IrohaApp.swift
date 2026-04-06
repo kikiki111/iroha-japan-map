@@ -44,4 +44,5 @@ private func seedPrefecturesIfNeeded(into context: ModelContext) {
             distanceFromTokyo: row.dist
         ))
     }
+    try? context.save()
 }

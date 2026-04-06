@@ -2,23 +2,21 @@
 
 ## 画面構成
 ContentView
-  ├── JapanMapView （地図・Canvas 描画・アニメーション）
+  ├── JapanMapView （Geolonia SVG + WKWebView で地図描画）
   ├── StatsBarView （訪問数・達成率・地方別バー）
   └── TimelineView （タイムライン・年間サマリー・旅ルート）
 
 ## データフロー
-GeoJSON → GeoJSONParser → [PrefectureShape]
-                                 ↓
 Prefecture（SwiftData）←→ MapViewModel → JapanMapView
                                  ↓
-                          TimelineViewModel → TimelineView
+                          Visit → TripDetector → TimelineView
 
 ## タップ処理の流れ
-1. タップ座標を取得（onTapGesture）
-2. すべての都道府県 CGPath にヒットテスト
-3. 一致した県に Visit を追加
-4. visitColor() で色を再計算
-5. マイルストーンチェック → アニメーション実行
+1. SVG 上の都道府県要素を JavaScript がタップ検出
+2. WKScriptMessageHandler 経由で Swift にコード送信
+3. MapViewModel.focus(prefecture:) で対象を選択
+4. AddVisitView シートで Visit を追加
+5. visitColorHex() で色を再計算し WebView に反映
 
 ## 旅ルート自動検出アルゴリズム
 1. 全 Visit を日付でソート

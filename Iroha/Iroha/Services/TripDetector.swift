@@ -37,7 +37,10 @@ enum TripDetector {
 
         return groups.map { group -> Trip in
             let seed = "\(group[0].prefectureName)|\(group[0].startDate.timeIntervalSinceReferenceDate)"
-            let tripID = UUID(uuidString: deterministicUUID(from: seed)) ?? UUID()
+            let uuidString = deterministicUUID(from: seed)
+            guard let tripID = UUID(uuidString: uuidString) else {
+                fatalError("deterministicUUID produced invalid UUID string: \(uuidString)")
+            }
             return Trip(id: tripID, visits: group)
         }
     }

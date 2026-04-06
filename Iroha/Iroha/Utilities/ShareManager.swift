@@ -37,7 +37,8 @@ enum ShareManager {
             popover.permittedArrowDirections = []
         }
 
-        window.rootViewController?.present(controller, animated: true)
+        guard let rootVC = window.rootViewController else { return }
+        rootVC.present(controller, animated: true)
     }
 }
 

@@ -30,14 +30,3 @@ struct JapanMapView: View {
     }
     .modelContainer(for: [Prefecture.self, Visit.self], inMemory: true)
 }
-
-// MARK: - Preview
-
-#Preview {
-    @Previewable @State var vm = MapViewModel()
-    ScrollView {
-        JapanMapView(mapViewModel: vm)
-            .padding()
-    }
-    .modelContainer(for: [Prefecture.self, Visit.self], inMemory: true)
-}
