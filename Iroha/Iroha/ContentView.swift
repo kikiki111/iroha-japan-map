@@ -18,6 +18,15 @@ struct ContentView: View {
 
             TimelineView(mapViewModel: mapViewModel)
                 .tabItem { Label("履歴", systemImage: "clock") }
+
+            DetailTabView()
+                .tabItem { Label("詳細", systemImage: "list.bullet") }
+
+            StatisticsTabView()
+                .tabItem { Label("統計", systemImage: "chart.bar") }
+
+            SettingsTabView()
+                .tabItem { Label("設定", systemImage: "gearshape") }
         }
         .tint(Color(hex: "#7F77DD"))
     }

@@ -5,7 +5,8 @@
 
 import SwiftUI
 
-enum Region: String, Codable, CaseIterable {
+enum Region: String, Codable, CaseIterable, Identifiable {
+    var id: String { rawValue }
     case hokkaido = "hokkaido"
     case tohoku   = "tohoku"
     case kanto    = "kanto"
