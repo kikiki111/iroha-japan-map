@@ -222,10 +222,10 @@ private struct VisitRow: View {
             Spacer()
             // 同じ日なら1日だけ、複数日なら「〜」でつなぐ
             Group {
-                if Calendar.current.isDate(visit.startDate, inSameDayAs: visit.endDate) {
+                if Calendar.current.isDate(visit.startDate, inSameDayAs: visit.effectiveEndDate) {
                     Text(visit.startDate, style: .date)
                 } else {
-                    Text("\(visit.startDate.formatted(.dateTime.month().day())) 〜 \(visit.endDate.formatted(.dateTime.month().day()))")
+                    Text("\(visit.startDate.formatted(.dateTime.month().day())) 〜 \(visit.effectiveEndDate.formatted(.dateTime.month().day()))")
                 }
             }
             .font(.caption)
@@ -298,7 +298,8 @@ struct AddVisitView: View {
     }
 
     private func save() {
-        let visit = Visit(prefectureName: selectedPrefectureName, startDate: startDate, endDate: endDate, note: note)
+        let effectiveEnd = Calendar.current.isDate(startDate, inSameDayAs: endDate) ? nil : endDate
+        let visit = Visit(prefectureName: selectedPrefectureName, startDate: startDate, endDate: effectiveEnd, note: note)
         visit.prefecture = prefectures.first { $0.name == selectedPrefectureName }
         modelContext.insert(visit)
         dismiss()

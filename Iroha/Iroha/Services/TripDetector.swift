@@ -21,7 +21,7 @@ enum TripDetector {
         var currentGroup: [Visit] = [sorted[0]]
 
         for index in 1..<sorted.count {
-            let previous = sorted[index - 1].endDate
+            let previous = sorted[index - 1].effectiveEndDate
             let current  = sorted[index].startDate
             let days = Calendar.current.dateComponents([.day], from: previous, to: current).day
             // Treat a nil result (pathological calendar state) as a trip boundary to

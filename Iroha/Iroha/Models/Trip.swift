@@ -25,7 +25,7 @@ struct Trip: Identifiable {
     /// - Note: `TripDetector` always constructs `Trip` with a non-empty `visits` array,
     ///   so the `.distantFuture` fallback is purely defensive and should never be reached.
     var endDate: Date {
-        visits.map(\.endDate).max() ?? .distantFuture
+        visits.map(\.effectiveEndDate).max() ?? .distantFuture
     }
 
     /// Unique prefecture names visited on this trip, sorted alphabetically.
