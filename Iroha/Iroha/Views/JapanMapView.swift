@@ -8,47 +8,62 @@ import SwiftData
 import CoreLocation
 
 /// GeoJSON を SwiftUI Canvas に描画する日本地図ビュー。
+/// 正規化座標（0..1）の CGPath を事前計算し、Canvas の描画フレームごとにスケール変換する。
 /// 都道府県をタップすると MapViewModel にフォーカスを設定する。
 struct JapanMapView: View {
     var mapViewModel: MapViewModel
 
     @Query(sort: \Prefecture.id) private var prefectures: [Prefecture]
-    @State private var geoShapes: [PrefectureShape] = []
+
+    /// 正規化座標(0..1)で保持する都道府県パス
+    @State private var normalizedShapes: [(name: String, paths: [CGPath])] = []
+    /// タップ判定用に Canvas の実描画サイズを保持
+    @State private var canvasSize: CGSize = .zero
 
     // Mercator 投影の縦横比 (width / height) ≈ Δλ_rad / ΔmercY
     private static let mapAspectRatio: CGFloat = 0.92
+    // 正規化計算に使う単位矩形
+    private static let unitRect = CGRect(x: 0, y: 0, width: 1, height: 1)
 
     var body: some View {
-        GeometryReader { geo in
-            Canvas { context, size in
-                drawMap(context: context, size: size)
-            }
-            .gesture(
-                SpatialTapGesture()
-                    .onEnded { value in
-                        let rect = CGRect(origin: .zero, size: geo.size)
-                        guard let shape = MapProjection.prefecture(
-                            at: value.location, in: rect, shapes: geoShapes
-                        ) else { return }
-                        if let pref = prefectures.first(where: { $0.name == shape.name }) {
-                            mapViewModel.focus(prefecture: pref)
-                        }
-                    }
-            )
+        Canvas { context, size in
+            renderMap(context: context, size: size)
         }
         .aspectRatio(Self.mapAspectRatio, contentMode: .fit)
+        // Canvas の実サイズをタップ判定用に取得（overlay の GeometryReader は Canvas の実サイズを受け取る）
+        .overlay(
+            GeometryReader { geo in
+                Color.clear.onAppear { canvasSize = geo.size }
+            }
+        )
+        .gesture(
+            SpatialTapGesture()
+                .onEnded { value in
+                    guard canvasSize != .zero else { return }
+                    let norm = CGPoint(
+                        x: value.location.x / canvasSize.width,
+                        y: value.location.y / canvasSize.height
+                    )
+                    guard let hit = normalizedShapes.first(where: { entry in
+                        entry.paths.contains { $0.contains(norm) }
+                    }) else { return }
+                    if let pref = prefectures.first(where: { $0.name == hit.name }) {
+                        mapViewModel.focus(prefecture: pref)
+                    }
+                }
+        )
         .onAppear { loadShapes() }
     }
 
-    // MARK: - Drawing
+    // MARK: - Canvas rendering
 
-    private func drawMap(context: GraphicsContext, size: CGSize) {
-        let rect = CGRect(origin: .zero, size: size)
+    private func renderMap(context: GraphicsContext, size: CGSize) {
+        let transform = CGAffineTransform(scaleX: size.width, y: size.height)
         let prefMap = Dictionary(uniqueKeysWithValues: prefectures.map { ($0.name, $0) })
 
-        for shape in geoShapes {
-            let pref = prefMap[shape.name]
-            let isFocused = mapViewModel.focusedPrefecture?.name == shape.name
+        for entry in normalizedShapes {
+            let pref = prefMap[entry.name]
+            let isFocused = mapViewModel.focusedPrefecture?.name == entry.name
 
             let fillColor: Color
             if isFocused {
@@ -59,34 +74,39 @@ struct JapanMapView: View {
                 fillColor = Color(hex: "#DDDAD4")
             }
 
-            for rings in shape.polygons {
-                let path = buildPath(rings: rings, in: rect)
-                context.fill(Path(path), with: .color(fillColor))
-                context.stroke(Path(path), with: .color(.white.opacity(0.8)), lineWidth: 0.5)
+            for normPath in entry.paths {
+                let scaled = Path(normPath).applying(transform)
+                context.fill(scaled, with: .color(fillColor))
+                context.stroke(scaled, with: .color(.white.opacity(0.8)), lineWidth: 0.5)
             }
         }
     }
 
-    private func buildPath(
-        rings: [[CLLocationCoordinate2D]],
-        in rect: CGRect
-    ) -> CGPath {
+    // MARK: - Data Loading
+
+    private func loadShapes() {
+        guard normalizedShapes.isEmpty else { return }
+        guard let geoShapes = try? GeoJSONParser.loadPrefectures() else { return }
+
+        normalizedShapes = geoShapes.map { shape in
+            let paths = shape.polygons.map { rings -> CGPath in
+                buildNormalizedPath(rings: rings)
+            }
+            return (name: shape.name, paths: paths)
+        }
+    }
+
+    /// 各リングを正規化座標（0..1）の CGPath に変換する。
+    private func buildNormalizedPath(rings: [[CLLocationCoordinate2D]]) -> CGPath {
         let path = CGMutablePath()
         for ring in rings {
-            let pts = ring.map { MapProjection.project($0, in: rect) }
+            let pts = ring.map { MapProjection.project($0, in: Self.unitRect) }
             guard let first = pts.first else { continue }
             path.move(to: first)
             path.addLines(between: Array(pts.dropFirst()))
             path.closeSubpath()
         }
         return path
-    }
-
-    // MARK: - Data Loading
-
-    private func loadShapes() {
-        guard geoShapes.isEmpty else { return }
-        geoShapes = (try? GeoJSONParser.loadPrefectures()) ?? []
     }
 }
 
