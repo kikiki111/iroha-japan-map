@@ -36,16 +36,29 @@ struct StatisticsTabView: View {
         var seen = Set<String>()
         var result: [VisitDataPoint] = []
 
+        // 0から始める
+        if let firstVisit = sorted.first {
+            let dayBefore = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: firstVisit.startDate))!
+            result.append(VisitDataPoint(date: dayBefore, count: 0))
+        }
+
         for visit in sorted {
             if seen.insert(visit.prefectureName).inserted {
                 let day = calendar.startOfDay(for: visit.startDate)
-                if let lastIdx = result.indices.last, calendar.isDate(result[lastIdx].date, inSameDayAs: day) {
+                if result.count > 1, let lastIdx = result.indices.last, calendar.isDate(result[lastIdx].date, inSameDayAs: day) {
                     result[lastIdx] = VisitDataPoint(date: day, count: seen.count)
                 } else {
                     result.append(VisitDataPoint(date: day, count: seen.count))
                 }
             }
         }
+
+        // 今日まで延ばす
+        let today = calendar.startOfDay(for: Date())
+        if let last = result.last, !calendar.isDate(last.date, inSameDayAs: today) {
+            result.append(VisitDataPoint(date: today, count: seen.count))
+        }
+
         return result
     }
 
@@ -57,7 +70,7 @@ struct StatisticsTabView: View {
                 } else {
                     VStack(spacing: 20) {
                         allTimeSection
-                        if visitProgression.count >= 2 {
+                        if !visits.isEmpty {
                             visitProgressionSection
                         }
                         if !availableYears.isEmpty {
@@ -148,7 +161,8 @@ struct StatisticsTabView: View {
                     y: .value("県数", point.count)
                 )
                 .foregroundStyle(Color(hex: "#7F77DD"))
-                .interpolationMethod(.stepEnd)
+                .interpolationMethod(.monotone)
+                .lineStyle(StrokeStyle(lineWidth: 2.5))
 
                 AreaMark(
                     x: .value("日付", point.date),
@@ -161,19 +175,16 @@ struct StatisticsTabView: View {
                         endPoint: .bottom
                     )
                 )
-                .interpolationMethod(.stepEnd)
+                .interpolationMethod(.monotone)
 
                 PointMark(
                     x: .value("日付", point.date),
                     y: .value("県数", point.count)
                 )
                 .foregroundStyle(Color(hex: "#7F77DD"))
-                .symbolSize(20)
+                .symbolSize(24)
             }
-            .chartYScale(domain: 0...47)
-            .chartYAxis {
-                AxisMarks(values: [0, 10, 20, 30, 40, 47])
-            }
+            .chartYScale(domain: 0...(max(visitedCount + 5, 10)))
             .frame(height: 200)
             .padding()
             .background(Color.irohaBackground)
