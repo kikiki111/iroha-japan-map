@@ -177,6 +177,65 @@ private let slashDateFormatter: DateFormatter = {
     return f
 }()
 
+// MARK: - TravelDatePicker
+
+/// カレンダーを2度タップして出発日・帰着日を設定するピッカー
+private struct TravelDatePicker: View {
+    @Binding var startDate: Date
+    @Binding var endDate: Date
+    @State private var selectingEndDate = false
+
+    private var currentDate: Binding<Date> {
+        Binding(
+            get: { selectingEndDate ? endDate : startDate },
+            set: { newDate in
+                if selectingEndDate {
+                    endDate = max(newDate, startDate)
+                } else {
+                    startDate = newDate
+                    if endDate < newDate { endDate = newDate }
+                    selectingEndDate = true
+                }
+            }
+        )
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 0) {
+                dateChip(title: "出発日", date: startDate, isActive: !selectingEndDate)
+                    .onTapGesture { selectingEndDate = false }
+                Image(systemName: "arrow.right")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 8)
+                dateChip(title: "帰着日", date: endDate, isActive: selectingEndDate)
+                    .onTapGesture { selectingEndDate = true }
+            }
+
+            DatePicker("", selection: currentDate, displayedComponents: .date)
+                .datePickerStyle(.graphical)
+                .environment(\.locale, Locale(identifier: "ja_JP"))
+                .tint(Color(hex: "#7F77DD"))
+        }
+    }
+
+    private func dateChip(title: String, date: Date, isActive: Bool) -> some View {
+        VStack(spacing: 2) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(slashDateFormatter.string(from: date))
+                .font(.subheadline)
+                .fontWeight(isActive ? .bold : .regular)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(isActive ? Color(hex: "#7F77DD").opacity(0.1) : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
 // MARK: - YearHeaderView
 
 struct YearHeaderView: View {
@@ -267,13 +326,7 @@ struct EditVisitView: View {
                 }
 
                 Section("旅行期間") {
-                    DatePicker("出発日", selection: $startDate, displayedComponents: .date)
-                        .environment(\.locale, Locale(identifier: "ja_JP"))
-                        .onChange(of: startDate) {
-                            if endDate < startDate { endDate = startDate }
-                        }
-                    DatePicker("帰着日", selection: $endDate, in: startDate..., displayedComponents: .date)
-                        .environment(\.locale, Locale(identifier: "ja_JP"))
+                    TravelDatePicker(startDate: $startDate, endDate: $endDate)
                 }
 
                 Section("メモ（任意）") {
@@ -286,6 +339,7 @@ struct EditVisitView: View {
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
             .onAppear {
                 selectedPrefectureName = visit.prefectureName
                 startDate = visit.startDate
@@ -310,6 +364,7 @@ struct EditVisitView: View {
                 }
             }
         }
+        .presentationBackground(.ultraThinMaterial)
     }
 
     private func save() {
@@ -350,19 +405,14 @@ struct AddVisitView: View {
                 }
 
                 Section("旅行期間") {
-                    DatePicker("出発日", selection: $startDate, displayedComponents: .date)
-                        .environment(\.locale, Locale(identifier: "ja_JP"))
-                        .onChange(of: startDate) {
-                            if endDate < startDate { endDate = startDate }
-                        }
-                    DatePicker("帰着日", selection: $endDate, in: startDate..., displayedComponents: .date)
-                        .environment(\.locale, Locale(identifier: "ja_JP"))
+                    TravelDatePicker(startDate: $startDate, endDate: $endDate)
                 }
 
                 Section("メモ（任意）") {
                     TextField("メモ", text: $note)
                 }
             }
+            .scrollContentBackground(.hidden)
             .onAppear {
                 if !initialPrefectureName.isEmpty {
                     selectedPrefectureName = initialPrefectureName
@@ -382,6 +432,7 @@ struct AddVisitView: View {
                 }
             }
         }
+        .presentationBackground(.ultraThinMaterial)
     }
 
     private func save() {

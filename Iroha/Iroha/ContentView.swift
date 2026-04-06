@@ -59,7 +59,7 @@ private struct MapTabView: View {
             .toolbar { toolbarContent }
             .sheet(item: $mapViewModel.focusedPrefecture) { prefecture in
                 AddVisitView(initialPrefectureName: prefecture.name)
-                    .presentationDetents([.medium, .large])
+                    .presentationDetents([.large])
             }
             .onAppear {
                 previousVisitedCount = mapViewModel.visitedPrefectureCount(prefectures: prefectures)

@@ -19,8 +19,7 @@ struct StatsBarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            summaryRow
-            progressBarSection
+            ringStatsRow
             regionDisclosure
         }
         .padding()
@@ -31,21 +30,18 @@ struct StatsBarView: View {
 
     // MARK: - Subviews
 
-    private var summaryRow: some View {
-        HStack {
-            StatItem(label: "訪問数", value: "\(visitedCount)/47")
+    private var ringStatsRow: some View {
+        HStack(spacing: 16) {
+            ConquestRingView(visited: visitedCount)
+            VStack(alignment: .leading, spacing: 8) {
+                StatItem(label: "訪問数", value: "\(visitedCount)/47")
+                StatItem(label: "訪問回数計", value: "\(totalVisits)回")
+            }
             Spacer()
-            StatItem(label: "訪問回数計", value: "\(totalVisits)回", alignment: .trailing)
-        }
-    }
-
-    private var progressBarSection: some View {
-        VStack(alignment: .trailing, spacing: 4) {
-            ProgressView(value: ratio)
-                .accessibilityLabel("達成率 \(Int(ratio * 100)) パーセント")
-            Text(String(format: "達成率 %.1f%%", ratio * 100))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Text(String(format: "%.1f%%", ratio * 100))
+                .font(.title2)
+                .fontWeight(.bold)
+                .foregroundStyle(Color(hex: "#7F77DD"))
         }
     }
 
@@ -63,6 +59,36 @@ struct StatsBarView: View {
                 .fontWeight(.medium)
         }
         .accessibilityLabel("地方別達成バー")
+    }
+}
+
+// MARK: - ConquestRingView
+
+private struct ConquestRingView: View {
+    let visited: Int
+    private let total = 47
+    private var ratio: CGFloat { CGFloat(visited) / CGFloat(total) }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color(.systemGray5), lineWidth: 8)
+            Circle()
+                .trim(from: 0, to: ratio)
+                .stroke(Color(hex: "#7F77DD"), style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .animation(.easeInOut(duration: 0.6), value: ratio)
+            VStack(spacing: 0) {
+                Text(verbatim: "\(visited)")
+                    .font(.title3)
+                    .fontWeight(.bold)
+                    .foregroundStyle(Color(hex: "#7F77DD"))
+                Text("/47")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 72, height: 72)
     }
 }
 

@@ -5,6 +5,7 @@
 
 import SwiftUI
 import SwiftData
+import Charts
 
 /// 旅行統計を表示するタブ
 struct StatisticsTabView: View {
@@ -29,6 +30,25 @@ struct StatisticsTabView: View {
         return years.sorted(by: >)
     }
 
+    private var visitProgression: [VisitDataPoint] {
+        let sorted = visits.sorted { $0.startDate < $1.startDate }
+        let calendar = Calendar.current
+        var seen = Set<String>()
+        var result: [VisitDataPoint] = []
+
+        for visit in sorted {
+            if seen.insert(visit.prefectureName).inserted {
+                let day = calendar.startOfDay(for: visit.startDate)
+                if let lastIdx = result.indices.last, calendar.isDate(result[lastIdx].date, inSameDayAs: day) {
+                    result[lastIdx] = VisitDataPoint(date: day, count: seen.count)
+                } else {
+                    result.append(VisitDataPoint(date: day, count: seen.count))
+                }
+            }
+        }
+        return result
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -37,6 +57,9 @@ struct StatisticsTabView: View {
                 } else {
                     VStack(spacing: 20) {
                         allTimeSection
+                        if visitProgression.count >= 2 {
+                            visitProgressionSection
+                        }
                         if !availableYears.isEmpty {
                             yearlySection
                         }
@@ -111,6 +134,54 @@ struct StatisticsTabView: View {
         }
     }
 
+    // MARK: - Visit progression chart
+
+    private var visitProgressionSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("訪問済み県数の推移")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            Chart(visitProgression) { point in
+                LineMark(
+                    x: .value("日付", point.date),
+                    y: .value("県数", point.count)
+                )
+                .foregroundStyle(Color(hex: "#7F77DD"))
+                .interpolationMethod(.stepEnd)
+
+                AreaMark(
+                    x: .value("日付", point.date),
+                    y: .value("県数", point.count)
+                )
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [Color(hex: "#7F77DD").opacity(0.3), Color(hex: "#7F77DD").opacity(0.05)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .interpolationMethod(.stepEnd)
+
+                PointMark(
+                    x: .value("日付", point.date),
+                    y: .value("県数", point.count)
+                )
+                .foregroundStyle(Color(hex: "#7F77DD"))
+                .symbolSize(20)
+            }
+            .chartYScale(domain: 0...47)
+            .chartYAxis {
+                AxisMarks(values: [0, 10, 20, 30, 40, 47])
+            }
+            .frame(height: 200)
+            .padding()
+            .background(Color.irohaBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
+        }
+    }
+
     // MARK: - Region breakdown
 
     private var regionSection: some View {
@@ -143,6 +214,14 @@ struct StatisticsTabView: View {
             .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
         }
     }
+}
+
+// MARK: - VisitDataPoint
+
+private struct VisitDataPoint: Identifiable {
+    let date: Date
+    let count: Int
+    var id: Date { date }
 }
 
 // MARK: - StatCard
