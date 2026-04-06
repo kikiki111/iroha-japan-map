@@ -4,97 +4,89 @@
 //
 
 import Foundation
+import SwiftData
 
-/// 日本の都道府県を表す値型
-struct Prefecture: Identifiable, Hashable, Sendable {
-    let id: Int
-    let name: String
-    let region: Region
-    let latitude: Double
-    let longitude: Double
+/// 日本の都道府県を表す SwiftData モデル
+@Model
+final class Prefecture {
+    /// 都道府県コード（1〜47）
+    var id: Int
+    var name: String
+    var region: Region
+    var latitude: Double
+    var longitude: Double
+    /// 東京からの直線距離（km）。シード時に計算済みの値を格納する。
+    var distanceFromTokyo: Double
 
-    // MARK: Hashable
-    static func == (lhs: Prefecture, rhs: Prefecture) -> Bool { lhs.id == rhs.id }
-    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    @Relationship(deleteRule: .cascade, inverse: \Visit.prefecture)
+    var visits: [Visit] = []
 
-    // MARK: Distance
+    var isVisited: Bool { !visits.isEmpty }
+    var visitCount: Int { visits.count }
 
-    /// 東京（35.6762°N, 139.6503°E）からのおおよその距離（メートル）
-    var distanceFromTokyo: Double {
-        haversineDistance(
-            lat1: latitude, lon1: longitude,
-            lat2: 35.6762,  lon2: 139.6503
-        )
-    }
-
-    // MARK: Static data
-
-    /// 全47都道府県
-    static let all: [Prefecture] = [
-        Prefecture(id:  1, name: "北海道",   region: .hokkaido, latitude: 43.0642, longitude: 141.3469),
-        Prefecture(id:  2, name: "青森県",   region: .tohoku,   latitude: 40.8244, longitude: 140.7400),
-        Prefecture(id:  3, name: "岩手県",   region: .tohoku,   latitude: 39.7036, longitude: 141.1527),
-        Prefecture(id:  4, name: "宮城県",   region: .tohoku,   latitude: 38.2688, longitude: 140.8721),
-        Prefecture(id:  5, name: "秋田県",   region: .tohoku,   latitude: 39.7186, longitude: 140.1023),
-        Prefecture(id:  6, name: "山形県",   region: .tohoku,   latitude: 38.2404, longitude: 140.3634),
-        Prefecture(id:  7, name: "福島県",   region: .tohoku,   latitude: 37.7500, longitude: 140.4677),
-        Prefecture(id:  8, name: "茨城県",   region: .kanto,    latitude: 36.3418, longitude: 140.4468),
-        Prefecture(id:  9, name: "栃木県",   region: .kanto,    latitude: 36.5658, longitude: 139.8836),
-        Prefecture(id: 10, name: "群馬県",   region: .kanto,    latitude: 36.3911, longitude: 139.0608),
-        Prefecture(id: 11, name: "埼玉県",   region: .kanto,    latitude: 35.8575, longitude: 139.6487),
-        Prefecture(id: 12, name: "千葉県",   region: .kanto,    latitude: 35.6050, longitude: 140.1233),
-        Prefecture(id: 13, name: "東京都",   region: .kanto,    latitude: 35.6762, longitude: 139.6503),
-        Prefecture(id: 14, name: "神奈川県", region: .kanto,    latitude: 35.4478, longitude: 139.6425),
-        Prefecture(id: 15, name: "新潟県",   region: .chubu,    latitude: 37.9161, longitude: 139.0364),
-        Prefecture(id: 16, name: "富山県",   region: .chubu,    latitude: 36.6953, longitude: 137.2113),
-        Prefecture(id: 17, name: "石川県",   region: .chubu,    latitude: 36.5947, longitude: 136.6256),
-        Prefecture(id: 18, name: "福井県",   region: .chubu,    latitude: 36.0652, longitude: 136.2219),
-        Prefecture(id: 19, name: "山梨県",   region: .chubu,    latitude: 35.6639, longitude: 138.5684),
-        Prefecture(id: 20, name: "長野県",   region: .chubu,    latitude: 36.6513, longitude: 138.1810),
-        Prefecture(id: 21, name: "岐阜県",   region: .chubu,    latitude: 35.3912, longitude: 136.7223),
-        Prefecture(id: 22, name: "静岡県",   region: .chubu,    latitude: 34.9769, longitude: 138.3831),
-        Prefecture(id: 23, name: "愛知県",   region: .chubu,    latitude: 35.1802, longitude: 136.9066),
-        Prefecture(id: 24, name: "三重県",   region: .kinki,    latitude: 34.7303, longitude: 136.5086),
-        Prefecture(id: 25, name: "滋賀県",   region: .kinki,    latitude: 35.0045, longitude: 135.8685),
-        Prefecture(id: 26, name: "京都府",   region: .kinki,    latitude: 35.0211, longitude: 135.7556),
-        Prefecture(id: 27, name: "大阪府",   region: .kinki,    latitude: 34.6937, longitude: 135.5022),
-        Prefecture(id: 28, name: "兵庫県",   region: .kinki,    latitude: 34.6913, longitude: 135.1830),
-        Prefecture(id: 29, name: "奈良県",   region: .kinki,    latitude: 34.6851, longitude: 135.8048),
-        Prefecture(id: 30, name: "和歌山県", region: .kinki,    latitude: 34.2260, longitude: 135.1675),
-        Prefecture(id: 31, name: "鳥取県",   region: .chugoku,  latitude: 35.5036, longitude: 134.2383),
-        Prefecture(id: 32, name: "島根県",   region: .chugoku,  latitude: 35.4723, longitude: 133.0505),
-        Prefecture(id: 33, name: "岡山県",   region: .chugoku,  latitude: 34.6617, longitude: 133.9344),
-        Prefecture(id: 34, name: "広島県",   region: .chugoku,  latitude: 34.3853, longitude: 132.4553),
-        Prefecture(id: 35, name: "山口県",   region: .chugoku,  latitude: 34.1860, longitude: 131.4706),
-        Prefecture(id: 36, name: "徳島県",   region: .shikoku,  latitude: 34.0658, longitude: 134.5593),
-        Prefecture(id: 37, name: "香川県",   region: .shikoku,  latitude: 34.3401, longitude: 134.0433),
-        Prefecture(id: 38, name: "愛媛県",   region: .shikoku,  latitude: 33.8417, longitude: 132.7657),
-        Prefecture(id: 39, name: "高知県",   region: .shikoku,  latitude: 33.5597, longitude: 133.5311),
-        Prefecture(id: 40, name: "福岡県",   region: .kyushu,   latitude: 33.5904, longitude: 130.4017),
-        Prefecture(id: 41, name: "佐賀県",   region: .kyushu,   latitude: 33.2494, longitude: 130.2988),
-        Prefecture(id: 42, name: "長崎県",   region: .kyushu,   latitude: 32.7447, longitude: 129.8737),
-        Prefecture(id: 43, name: "熊本県",   region: .kyushu,   latitude: 32.7898, longitude: 130.7417),
-        Prefecture(id: 44, name: "大分県",   region: .kyushu,   latitude: 33.2382, longitude: 131.6126),
-        Prefecture(id: 45, name: "宮崎県",   region: .kyushu,   latitude: 31.9111, longitude: 131.4239),
-        Prefecture(id: 46, name: "鹿児島県", region: .kyushu,   latitude: 31.5966, longitude: 130.5571),
-        Prefecture(id: 47, name: "沖縄県",   region: .kyushu,   latitude: 26.2124, longitude: 127.6809),
-    ]
-
-    /// 名前から都道府県を検索する
-    static func named(_ name: String) -> Prefecture? {
-        all.first { $0.name == name }
+    init(id: Int, name: String, region: Region,
+         latitude: Double, longitude: Double, distanceFromTokyo: Double) {
+        self.id                = id
+        self.name              = name
+        self.region            = region
+        self.latitude          = latitude
+        self.longitude         = longitude
+        self.distanceFromTokyo = distanceFromTokyo
     }
 }
 
-// MARK: - Haversine distance
+// MARK: - Seed data
 
-private func haversineDistance(lat1: Double, lon1: Double,
-                               lat2: Double, lon2: Double) -> Double {
-    let r = 6_371_000.0  // Earth radius in meters
-    let dLat = (lat2 - lat1) * .pi / 180
-    let dLon = (lon2 - lon1) * .pi / 180
-    let a = sin(dLat / 2) * sin(dLat / 2)
-          + cos(lat1 * .pi / 180) * cos(lat2 * .pi / 180)
-          * sin(dLon / 2) * sin(dLon / 2)
-    return r * 2 * atan2(sqrt(a), sqrt(1 - a))
+extension Prefecture {
+    /// DB が空のときに挿入する全 47 都道府県のシードデータ
+    static let seedRows: [(id: Int, name: String, region: Region,
+                           lat: Double, lon: Double, dist: Double)] = [
+        ( 1, "北海道",   .hokkaido, 43.0642, 141.3469,  832),
+        ( 2, "青森県",   .tohoku,   40.8244, 140.7400,  677),
+        ( 3, "岩手県",   .tohoku,   39.7036, 141.1527,  570),
+        ( 4, "宮城県",   .tohoku,   38.2688, 140.8721,  346),
+        ( 5, "秋田県",   .tohoku,   39.7186, 140.1023,  478),
+        ( 6, "山形県",   .tohoku,   38.2404, 140.3634,  362),
+        ( 7, "福島県",   .tohoku,   37.7500, 140.4677,  266),
+        ( 8, "茨城県",   .kanto,    36.3418, 140.4468,  108),
+        ( 9, "栃木県",   .kanto,    36.5658, 139.8836,  109),
+        (10, "群馬県",   .kanto,    36.3911, 139.0608,  120),
+        (11, "埼玉県",   .kanto,    35.8575, 139.6487,   40),
+        (12, "千葉県",   .kanto,    35.6050, 140.1233,   40),
+        (13, "東京都",   .kanto,    35.6762, 139.6503,    0),
+        (14, "神奈川県", .kanto,    35.4478, 139.6425,   35),
+        (15, "新潟県",   .chubu,    37.9161, 139.0364,  251),
+        (16, "富山県",   .chubu,    36.6953, 137.2113,  260),
+        (17, "石川県",   .chubu,    36.5947, 136.6256,  321),
+        (18, "福井県",   .chubu,    36.0652, 136.2219,  349),
+        (19, "山梨県",   .chubu,    35.6639, 138.5684,  129),
+        (20, "長野県",   .chubu,    36.6513, 138.1810,  210),
+        (21, "岐阜県",   .chubu,    35.3912, 136.7223,  322),
+        (22, "静岡県",   .chubu,    34.9769, 138.3831,  183),
+        (23, "愛知県",   .chubu,    35.1802, 136.9066,  270),
+        (24, "三重県",   .kinki,    34.7303, 136.5086,  372),
+        (25, "滋賀県",   .kinki,    35.0045, 135.8685,  423),
+        (26, "京都府",   .kinki,    35.0211, 135.7556,  453),
+        (27, "大阪府",   .kinki,    34.6937, 135.5022,  502),
+        (28, "兵庫県",   .kinki,    34.6913, 135.1830,  556),
+        (29, "奈良県",   .kinki,    34.6851, 135.8048,  461),
+        (30, "和歌山県", .kinki,    34.2260, 135.1675,  519),
+        (31, "鳥取県",   .chugoku,  35.5036, 134.2383,  624),
+        (32, "島根県",   .chugoku,  35.4723, 133.0505,  754),
+        (33, "岡山県",   .chugoku,  34.6617, 133.9344,  654),
+        (34, "広島県",   .chugoku,  34.3853, 132.4553,  723),
+        (35, "山口県",   .chugoku,  34.1860, 131.4706,  841),
+        (36, "徳島県",   .shikoku,  34.0658, 134.5593,  637),
+        (37, "香川県",   .shikoku,  34.3401, 134.0433,  670),
+        (38, "愛媛県",   .shikoku,  33.8417, 132.7657,  757),
+        (39, "高知県",   .shikoku,  33.5597, 133.5311,  784),
+        (40, "福岡県",   .kyushu,   33.5904, 130.4017, 1051),
+        (41, "佐賀県",   .kyushu,   33.2494, 130.2988, 1099),
+        (42, "長崎県",   .kyushu,   32.7447, 129.8737, 1197),
+        (43, "熊本県",   .kyushu,   32.7898, 130.7417, 1110),
+        (44, "大分県",   .kyushu,   33.2382, 131.6126, 1015),
+        (45, "宮崎県",   .kyushu,   31.9111, 131.4239, 1109),
+        (46, "鹿児島県", .kyushu,   31.5966, 130.5571, 1201),
+        (47, "沖縄県",   .kyushu,   26.2124, 127.6809, 1555),
+    ]
 }

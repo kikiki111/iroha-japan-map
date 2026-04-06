@@ -28,5 +28,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .modelContainer(for: Visit.self, inMemory: true)
+        .modelContainer(for: [Prefecture.self, Visit.self], inMemory: true)
 }

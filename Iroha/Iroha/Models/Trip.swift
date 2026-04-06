@@ -5,27 +5,31 @@
 
 import Foundation
 
-/// 連続する訪問をまとめた旅行グループ
-///
-/// `TripDetector.detect(from:)` は空の `visits` を持つ `Trip` を生成しないため、
-/// `startDate` / `endDate` の計算は常に有効な値を返す。
+/// A group of consecutive visits detected as belonging to the same trip.
 struct Trip: Identifiable {
     let id: UUID
-    /// グループ内の訪問一覧（1件以上）
     let visits: [Visit]
 
-    /// 旅行の開始日（最も早い訪問日）
+    // MARK: - Computed properties
+
+    /// The earliest visit date.
+    ///
+    /// - Note: `TripDetector` always constructs `Trip` with a non-empty `visits` array,
+    ///   so the `.distantPast` fallback is purely defensive and should never be reached.
     var startDate: Date {
-        visits.map { $0.date }.min() ?? Date()
+        visits.map(\.date).min() ?? .distantPast
     }
 
-    /// 旅行の終了日（最も遅い訪問日）
+    /// The latest visit date.
+    ///
+    /// - Note: `TripDetector` always constructs `Trip` with a non-empty `visits` array,
+    ///   so the `.distantFuture` fallback is purely defensive and should never be reached.
     var endDate: Date {
-        visits.map { $0.date }.max() ?? Date()
+        visits.map(\.date).max() ?? .distantFuture
     }
 
-    /// 訪問した都道府県の一覧（重複なし）
+    /// Unique prefecture names visited on this trip, sorted alphabetically.
     var prefectureNames: [String] {
-        Array(Set(visits.map { $0.prefectureName })).sorted()
+        Array(Set(visits.map(\.prefectureName))).sorted()
     }
 }

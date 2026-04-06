@@ -7,28 +7,22 @@ import SwiftUI
 import SwiftData
 
 /// 日本地図ビュー
-/// MapViewModel.focusedPrefectureName の変化を受けてハイライト表示する
+/// MapViewModel.focusedPrefecture の変化を受けてハイライト表示する
 struct JapanMapView: View {
     var mapViewModel: MapViewModel
 
-    @Query(sort: \Visit.date, order: .reverse) private var visits: [Visit]
-
-    /// 訪問済みの都道府県名セット
-    private var visitedNames: Set<String> {
-        Set(visits.map { $0.prefectureName })
-    }
+    @Query(sort: \Prefecture.id) private var prefectures: [Prefecture]
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    // 都道府県グリッド（簡易マップ代替）
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 80))], spacing: 8) {
-                        ForEach(Prefecture.all) { prefecture in
+                        ForEach(prefectures) { prefecture in
                             PrefectureCell(
                                 prefecture: prefecture,
-                                isVisited: visitedNames.contains(prefecture.name),
-                                isFocused: mapViewModel.focusedPrefectureName == prefecture.name
+                                isVisited: prefecture.isVisited,
+                                isFocused: mapViewModel.focusedPrefecture?.name == prefecture.name
                             )
                         }
                     }
@@ -37,7 +31,7 @@ struct JapanMapView: View {
             }
             .navigationTitle("日本地図")
             .toolbar {
-                if mapViewModel.focusedPrefectureName != nil {
+                if mapViewModel.focusedPrefecture != nil {
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button("クリア") {
                             mapViewModel.clearFocus()
@@ -76,7 +70,6 @@ private struct PrefectureCell: View {
 
     private var background: Color {
         if isFocused { return .orange }
-        if isVisited { return .blue.opacity(0.25) }
-        return Color(.systemGray5)
+        return prefecture.visitColor()
     }
 }

@@ -40,7 +40,7 @@ private extension Color {
 
 extension Prefecture {
     /// visitCount に応じた塗りつぶし色を返す。
-    func visitColor(visitCount: Int) -> Color {
+    func visitColor() -> Color {
         switch visitCount {
         case 0:    return .visitNone
         case 1:    return .visitLight
