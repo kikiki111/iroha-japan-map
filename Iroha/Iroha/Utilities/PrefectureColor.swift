@@ -49,4 +49,15 @@ extension Prefecture {
         default:   return .visitDarkest
         }
     }
+
+    /// WebView へ渡す用の Hex 文字列（visitColor と同じ値）
+    func visitColorHex() -> String {
+        switch visitCount {
+        case 0:    return "#DDDAD4"
+        case 1:    return "#C8C4F0"
+        case 2:    return "#9F97DD"
+        case 3, 4: return "#7F77DD"
+        default:   return "#534AB7"
+        }
+    }
 }
