@@ -177,7 +177,7 @@ struct StatisticsTabView: View {
                 }
             }
             .chartScrollableAxes(.horizontal)
-            .chartXVisibleDomain(length: 3600 * 24 * 30)
+            .chartXVisibleDomain(length: 3600 * 24 * 365)
             .frame(height: 180)
             .padding()
             .background(Color.irohaBackground)
