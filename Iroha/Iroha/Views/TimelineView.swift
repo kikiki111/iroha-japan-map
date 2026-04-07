@@ -255,9 +255,6 @@ struct YearHeaderView: View {
             HStack(spacing: 12) {
                 Label("\(summary.prefectureCount)県", systemImage: "map")
                 Label("\(summary.visitCount)回", systemImage: "figure.walk")
-                if let farthest = summary.farthestPrefectureName {
-                    Label(farthest, systemImage: "location.north.fill")
-                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
