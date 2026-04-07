@@ -157,7 +157,7 @@ struct StatisticsTabView: View {
                 .foregroundStyle(Color(hex: "#7F77DD"))
                 .symbolSize(30)
             }
-            .chartYScale(domain: 0...)
+            .chartYScale(domain: 0...(totalVisits + 2))
             .chartScrollableAxes(.horizontal)
             .chartXVisibleDomain(length: 3600 * 24 * 30)
             .frame(height: 180)
