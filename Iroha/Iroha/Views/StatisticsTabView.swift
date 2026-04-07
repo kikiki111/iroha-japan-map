@@ -194,22 +194,41 @@ struct StatisticsTabView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-            ForEach(Region.allCases, id: \.self) { region in
+            ForEach(Region.allCases) { region in
                 let group = prefectures.filter { $0.region == region }
                 let visited = group.filter(\.isVisited).count
                 let total = group.count
                 let ratio = total > 0 ? Double(visited) / Double(total) : 0
 
-                HStack(spacing: 8) {
-                    Text(region.localizedName)
-                        .font(.caption)
-                        .frame(width: 44, alignment: .leading)
-                    ProgressView(value: ratio)
-                        .tint(region.color)
-                    Text(verbatim: "\(visited)/\(total)")
-                        .font(.caption)
-                        .monospacedDigit()
-                        .frame(width: 28, alignment: .trailing)
+                DisclosureGroup {
+                    ForEach(group) { pref in
+                        HStack {
+                            Image(systemName: pref.isVisited ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(pref.isVisited ? region.color : Color(.systemGray4))
+                                .font(.subheadline)
+                            Text(pref.name)
+                                .font(.subheadline)
+                            Spacer()
+                            if pref.isVisited {
+                                Text(verbatim: "\(pref.visits.count)回")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(region.localizedName)
+                            .font(.caption)
+                            .frame(width: 44, alignment: .leading)
+                        ProgressView(value: ratio)
+                            .tint(region.color)
+                        Text(verbatim: "\(visited)/\(total)")
+                            .font(.caption)
+                            .monospacedDigit()
+                            .frame(width: 28, alignment: .trailing)
+                    }
                 }
             }
             .padding()
