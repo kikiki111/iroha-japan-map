@@ -165,7 +165,7 @@ struct StatisticsTabView: View {
             }
             .chartYScale(domain: 0...(totalVisits + 2))
             .chartXAxis {
-                AxisMarks(values: visitProgression.map(\.date)) { value in
+                AxisMarks { value in
                     AxisGridLine()
                     AxisValueLabel {
                         if let date = value.as(Date.self) {
