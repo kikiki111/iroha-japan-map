@@ -37,12 +37,6 @@ struct StatisticsTabView: View {
         var result: [VisitDataPoint] = []
         var cumulative = 0
 
-        // 初回訪問の前日を0として追加
-        if let first = sorted.first {
-            let dayBefore = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: first.startDate))!
-            result.append(VisitDataPoint(date: dayBefore, count: 0))
-        }
-
         for visit in sorted {
             cumulative += 1
             let day = calendar.startOfDay(for: visit.startDate)
@@ -169,9 +163,11 @@ struct StatisticsTabView: View {
                     AxisGridLine()
                     AxisValueLabel {
                         if let date = value.as(Date.self) {
+                            let y = Calendar.current.component(.year, from: date) % 100
                             let m = Calendar.current.component(.month, from: date)
                             let d = Calendar.current.component(.day, from: date)
-                            Text(verbatim: "\(m)/\(d)")
+                            Text(verbatim: "\(y)/\(m)/\(d)")
+                                .font(.caption2)
                         }
                     }
                 }
