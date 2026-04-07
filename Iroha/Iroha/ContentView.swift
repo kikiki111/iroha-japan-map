@@ -17,7 +17,7 @@ struct ContentView: View {
                 .tabItem { Label("地図", systemImage: "map") }
 
             TimelineView(mapViewModel: mapViewModel)
-                .tabItem { Label("履歴", systemImage: "clock") }
+                .tabItem { Label("タイムライン", systemImage: "clock") }
 
             DetailTabView()
                 .tabItem { Label("詳細", systemImage: "list.bullet") }

@@ -27,7 +27,7 @@ struct StatisticsTabView: View {
     private var availableYears: [Int] {
         let calendar = Calendar.current
         let years = Set(visits.map { calendar.component(.year, from: $0.startDate) })
-        return years.sorted(by: >)
+        return years.sorted()
     }
 
     /// 訪問ごとの累積旅行回数（常に増加するデータ）
