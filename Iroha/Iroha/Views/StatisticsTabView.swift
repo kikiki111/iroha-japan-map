@@ -143,7 +143,7 @@ struct StatisticsTabView: View {
             }
             .chartYScale(domain: 0...(totalVisits + 2))
             .chartXAxis {
-                AxisMarks { value in
+                AxisMarks(values: .stride(by: .month, count: 3)) { value in
                     AxisGridLine()
                     AxisValueLabel {
                         if let date = value.as(Date.self) {
@@ -151,10 +151,10 @@ struct StatisticsTabView: View {
                             let m = cal.component(.month, from: date)
                             let d = cal.component(.day, from: date)
                             if m == 1 && d == 1 {
-                                let y = cal.component(.year, from: date)
-                                Text(verbatim: "\(y)年")
+                                let y = cal.component(.year, from: date) % 100
+                                Text(verbatim: "\(y)/1/1")
                             } else {
-                                Text(verbatim: "\(m)/\(d)")
+                                Text(verbatim: "\(m)/1")
                             }
                         }
                     }
