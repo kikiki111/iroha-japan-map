@@ -164,6 +164,16 @@ struct StatisticsTabView: View {
                 .symbolSize(30)
             }
             .chartYScale(domain: 0...(totalVisits + 2))
+            .chartXAxis {
+                AxisMarks(values: .automatic) { value in
+                    AxisGridLine()
+                    AxisValueLabel {
+                        if let date = value.as(Date.self) {
+                            Text(date, format: .dateTime.month(.defaultDigits).day())
+                        }
+                    }
+                }
+            }
             .chartScrollableAxes(.horizontal)
             .chartXVisibleDomain(length: 3600 * 24 * 30)
             .frame(height: 180)
