@@ -163,17 +163,21 @@ struct StatisticsTabView: View {
                     AxisGridLine()
                     AxisValueLabel {
                         if let date = value.as(Date.self) {
-                            let y = Calendar.current.component(.year, from: date) % 100
-                            let m = Calendar.current.component(.month, from: date)
-                            let d = Calendar.current.component(.day, from: date)
-                            Text(verbatim: "\(y)/\(m)/\(d)")
-                                .font(.caption2)
+                            let cal = Calendar.current
+                            let m = cal.component(.month, from: date)
+                            let d = cal.component(.day, from: date)
+                            if m == 1 && d == 1 {
+                                let y = cal.component(.year, from: date)
+                                Text(verbatim: "\(y)年")
+                            } else {
+                                Text(verbatim: "\(m)/\(d)")
+                            }
                         }
                     }
                 }
             }
             .chartScrollableAxes(.horizontal)
-            .chartXVisibleDomain(length: 3600 * 24 * 365)
+            .chartXVisibleDomain(length: 3600 * 24 * 730)
             .frame(height: 180)
             .padding()
             .background(Color.irohaBackground)
