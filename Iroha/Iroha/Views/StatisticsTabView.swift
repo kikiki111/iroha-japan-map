@@ -30,35 +30,22 @@ struct StatisticsTabView: View {
         return years.sorted(by: >)
     }
 
+    /// 訪問ごとの累積旅行回数（常に増加するデータ）
     private var visitProgression: [VisitDataPoint] {
         let sorted = visits.sorted { $0.startDate < $1.startDate }
         let calendar = Calendar.current
-        var seen = Set<String>()
         var result: [VisitDataPoint] = []
-
-        // 0から始める
-        if let firstVisit = sorted.first {
-            let dayBefore = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: firstVisit.startDate))!
-            result.append(VisitDataPoint(date: dayBefore, count: 0))
-        }
+        var cumulative = 0
 
         for visit in sorted {
-            if seen.insert(visit.prefectureName).inserted {
-                let day = calendar.startOfDay(for: visit.startDate)
-                if result.count > 1, let lastIdx = result.indices.last, calendar.isDate(result[lastIdx].date, inSameDayAs: day) {
-                    result[lastIdx] = VisitDataPoint(date: day, count: seen.count)
-                } else {
-                    result.append(VisitDataPoint(date: day, count: seen.count))
-                }
+            cumulative += 1
+            let day = calendar.startOfDay(for: visit.startDate)
+            if let lastIdx = result.indices.last, calendar.isDate(result[lastIdx].date, inSameDayAs: day) {
+                result[lastIdx] = VisitDataPoint(date: day, count: cumulative)
+            } else {
+                result.append(VisitDataPoint(date: day, count: cumulative))
             }
         }
-
-        // 今日まで延ばす
-        let today = calendar.startOfDay(for: Date())
-        if let last = result.last, !calendar.isDate(last.date, inSameDayAs: today) {
-            result.append(VisitDataPoint(date: today, count: seen.count))
-        }
-
         return result
     }
 
@@ -151,41 +138,22 @@ struct StatisticsTabView: View {
 
     private var visitProgressionSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("訪問済み県数の推移")
+            Text("旅行回数の推移")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
             Chart(visitProgression) { point in
-                LineMark(
-                    x: .value("日付", point.date),
-                    y: .value("県数", point.count)
+                BarMark(
+                    x: .value("日付", point.date, unit: .day),
+                    y: .value("回数", point.count)
                 )
-                .foregroundStyle(Color(hex: "#7F77DD"))
-                .interpolationMethod(.linear)
-                .lineStyle(StrokeStyle(lineWidth: 2.5))
-
-                AreaMark(
-                    x: .value("日付", point.date),
-                    y: .value("県数", point.count)
-                )
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [Color(hex: "#7F77DD").opacity(0.3), Color(hex: "#7F77DD").opacity(0.05)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .interpolationMethod(.linear)
-
-                PointMark(
-                    x: .value("日付", point.date),
-                    y: .value("県数", point.count)
-                )
-                .foregroundStyle(Color(hex: "#7F77DD"))
-                .symbolSize(24)
+                .foregroundStyle(Color(hex: "#7F77DD").opacity(0.7))
+                .cornerRadius(4)
             }
-            .chartYScale(domain: 0...(max(visitedCount + 5, 10)))
-            .frame(height: 200)
+            .chartYAxis {
+                AxisMarks(preset: .aligned)
+            }
+            .frame(height: 180)
             .padding()
             .background(Color.irohaBackground)
             .clipShape(RoundedRectangle(cornerRadius: 12))
