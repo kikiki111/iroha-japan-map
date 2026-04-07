@@ -165,11 +165,13 @@ struct StatisticsTabView: View {
             }
             .chartYScale(domain: 0...(totalVisits + 2))
             .chartXAxis {
-                AxisMarks(values: .automatic) { value in
+                AxisMarks(values: visitProgression.map(\.date)) { value in
                     AxisGridLine()
                     AxisValueLabel {
                         if let date = value.as(Date.self) {
-                            Text(date, format: .dateTime.month(.defaultDigits).day())
+                            let m = Calendar.current.component(.month, from: date)
+                            let d = Calendar.current.component(.day, from: date)
+                            Text(verbatim: "\(m)/\(d)")
                         }
                     }
                 }
