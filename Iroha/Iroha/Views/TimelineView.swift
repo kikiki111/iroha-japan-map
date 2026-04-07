@@ -85,13 +85,17 @@ struct TimelineView: View {
         List {
             ForEach(visitsByYear) { yearGroup in
                 Section {
-                    ForEach(yearGroup.monthGroups) { monthGroup in
-                        Text(monthGroup.label)
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.secondary)
-                            .listRowBackground(Color(.systemGroupedBackground))
+                    YearHeaderView(
+                        year: yearGroup.year,
+                        summary: yearSummary(for: yearGroup.year)
+                    )
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 4, trailing: 16))
+                    .listRowSeparator(.hidden)
+                }
 
+                ForEach(yearGroup.monthGroups) { monthGroup in
+                    Section {
                         ForEach(monthGroup.visits) { visit in
                             VisitRow(visit: visit)
                                 .contentShape(Rectangle())
@@ -100,12 +104,11 @@ struct TimelineView: View {
                                 }
                         }
                         .onDelete { offsets in deleteVisits(offsets, from: monthGroup.visits) }
+                    } header: {
+                        Text(monthGroup.label)
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
                     }
-                } header: {
-                    YearHeaderView(
-                        year: yearGroup.year,
-                        summary: yearSummary(for: yearGroup.year)
-                    )
                 }
             }
         }
