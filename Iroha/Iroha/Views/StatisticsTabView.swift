@@ -143,15 +143,19 @@ struct StatisticsTabView: View {
                 .foregroundStyle(.secondary)
 
             Chart(visitProgression) { point in
-                BarMark(
-                    x: .value("日付", point.date, unit: .day),
+                LineMark(
+                    x: .value("日付", point.date),
                     y: .value("回数", point.count)
                 )
-                .foregroundStyle(Color(hex: "#7F77DD").opacity(0.7))
-                .cornerRadius(4)
-            }
-            .chartYAxis {
-                AxisMarks(preset: .aligned)
+                .foregroundStyle(Color(hex: "#7F77DD"))
+                .lineStyle(StrokeStyle(lineWidth: 2))
+
+                PointMark(
+                    x: .value("日付", point.date),
+                    y: .value("回数", point.count)
+                )
+                .foregroundStyle(Color(hex: "#7F77DD"))
+                .symbolSize(30)
             }
             .frame(height: 180)
             .padding()
