@@ -12,7 +12,7 @@ struct StatisticsTabView: View {
     @Query(sort: \Prefecture.id) private var prefectures: [Prefecture]
     @Query(sort: \Visit.startDate) private var visits: [Visit]
 
-    @State private var selectedYear: Int?
+    @State private var selectedYear: Int = 0 // 0 = 全期間
 
     private var visitedCount: Int { prefectures.filter(\.isVisited).count }
     private var totalVisits: Int { visits.count }
@@ -56,12 +56,9 @@ struct StatisticsTabView: View {
                     emptyState
                 } else {
                     VStack(spacing: 20) {
-                        allTimeSection
+                        periodSection
                         if !visits.isEmpty {
                             visitProgressionSection
-                        }
-                        if !availableYears.isEmpty {
-                            yearlySection
                         }
                         regionSection
                     }
@@ -83,53 +80,40 @@ struct StatisticsTabView: View {
         }
     }
 
-    // MARK: - All-time
+    // MARK: - Period (全期間 + 年度別を統合)
 
-    private var allTimeSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("全期間統計")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                StatCard(icon: "airplane", label: "総旅行回数", value: "\(totalVisits)", unit: "回", color: Color(hex: "#7F77DD"))
-                StatCard(icon: "calendar", label: "総旅行日数", value: "\(totalDays)", unit: "日", color: Color(hex: "#9F97DD"))
-                StatCard(icon: "map", label: "訪問済み県", value: "\(visitedCount)", unit: "県", color: Color(hex: "#AFA9EC"))
-                StatCard(icon: "target", label: "制覇率", value: String(format: "%.1f", conquestRate), unit: "%", color: Color(hex: "#534AB7"))
-            }
-        }
+    private var filteredVisits: [Visit] {
+        if selectedYear == 0 { return Array(visits) }
+        return visits.filter { Calendar.current.component(.year, from: $0.startDate) == selectedYear }
     }
 
-    // MARK: - Yearly
+    private var periodSection: some View {
+        let fv = filteredVisits
+        let tripCount = fv.count
+        let dayCount = fv.reduce(0) { sum, visit in
+            let days = Calendar.current.dateComponents([.day], from: visit.startDate, to: visit.effectiveEndDate).day ?? 0
+            return sum + max(days, 1)
+        }
+        let prefCount = Set(fv.map(\.prefectureName)).count
+        let rate = Double(prefCount) / 47.0 * 100
 
-    private var yearlySection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("年度別統計")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            Picker("年", selection: Binding(
-                get: { selectedYear ?? availableYears.first ?? 0 },
-                set: { selectedYear = $0 }
-            )) {
-                ForEach(availableYears, id: \.self) { year in
-                    Text(verbatim: "\(year)年").tag(year)
+        return VStack(alignment: .leading, spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    PeriodTab(label: "全期間", isSelected: selectedYear == 0)
+                        .onTapGesture { selectedYear = 0 }
+                    ForEach(availableYears, id: \.self) { year in
+                        PeriodTab(label: "\(year)年", isSelected: selectedYear == year)
+                            .onTapGesture { selectedYear = year }
+                    }
                 }
             }
-            .pickerStyle(.segmented)
-
-            let year = selectedYear ?? availableYears.first ?? 0
-            let yearVisits = visits.filter { Calendar.current.component(.year, from: $0.startDate) == year }
-            let yearDays = yearVisits.reduce(0) { sum, visit in
-                let days = Calendar.current.dateComponents([.day], from: visit.startDate, to: visit.effectiveEndDate).day ?? 0
-                return sum + max(days, 1)
-            }
-            let yearPrefectures = Set(yearVisits.map(\.prefectureName)).count
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                StatCard(icon: "airplane", label: "旅行回数", value: "\(yearVisits.count)", unit: "回", color: Color(hex: "#7F77DD"))
-                StatCard(icon: "calendar", label: "旅行日数", value: "\(yearDays)", unit: "日", color: Color(hex: "#9F97DD"))
-                StatCard(icon: "map", label: "訪問県数", value: "\(yearPrefectures)", unit: "県", color: Color(hex: "#AFA9EC"))
+                StatCard(icon: "airplane", label: "旅行回数", value: "\(tripCount)", unit: "回", color: Color(hex: "#7F77DD"))
+                StatCard(icon: "calendar", label: "旅行日数", value: "\(dayCount)", unit: "日", color: Color(hex: "#9F97DD"))
+                StatCard(icon: "map", label: "訪問済み県", value: "\(prefCount)", unit: "県", color: Color(hex: "#AFA9EC"))
+                StatCard(icon: "target", label: "制覇率", value: String(format: "%.1f", rate), unit: "%", color: Color(hex: "#534AB7"))
             }
         }
     }
@@ -277,6 +261,24 @@ private struct StatCard: View {
         .frame(maxWidth: .infinity, minHeight: 90)
         .background(Color(.systemGray6))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+// MARK: - PeriodTab
+
+private struct PeriodTab: View {
+    let label: String
+    let isSelected: Bool
+
+    var body: some View {
+        Text(label)
+            .font(.subheadline)
+            .fontWeight(isSelected ? .bold : .regular)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(isSelected ? Color(hex: "#7F77DD") : Color(.systemGray6))
+            .foregroundStyle(isSelected ? .white : .primary)
+            .clipShape(Capsule())
     }
 }
 
