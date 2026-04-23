@@ -14,6 +14,8 @@ final class JapanMapWKWebView: WKWebView {
 
     /// 都道府県コード（1〜47）を受け取るタップコールバック
     var onTap: ((Int) -> Void)?
+    /// 都道府県コード（1〜47）を受け取るロングプレスコールバック
+    var onLongPress: ((Int) -> Void)?
 
     private var isPageLoaded = false
     private var latestColorMap: [String: String] = [:]
@@ -46,6 +48,7 @@ final class JapanMapWKWebView: WKWebView {
         latestHighlightCode = code
         if isPageLoaded { applyUpdates() }
     }
+
 
     /// 地方制覇アニメーション：指定都道府県を一時的にフラッシュ
     func flashPrefectures(codes: [Int], color: String, durationMs: Int, originalColors: [String: String]) {
@@ -86,10 +89,17 @@ final class JapanMapWKWebView: WKWebView {
     fileprivate func handleScriptMessage(_ body: Any) {
         guard let data = body as? [String: Any],
               let action = data["action"] as? String,
-              action == "prefectureTapped",
               let code = data["prefectureCode"] as? Int else { return }
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        onTap?(code)
+        switch action {
+        case "prefectureTapped":
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            onTap?(code)
+        case "prefectureLongPressed":
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            onLongPress?(code)
+        default:
+            break
+        }
     }
 
     // MARK: - HTML template
@@ -118,6 +128,9 @@ final class JapanMapWKWebView: WKWebView {
         \(svgContent)
         <script>
         (function() {
+            var lastTapTime = 0;
+            var lastTapCode = 0;
+            var tapTimer = null;
             function setup() {
                 var els = document.querySelectorAll('.prefecture');
                 if (els.length === 0) { setTimeout(setup, 100); return; }
@@ -125,17 +138,44 @@ final class JapanMapWKWebView: WKWebView {
                     el.addEventListener('touchstart', function(e) { e.preventDefault(); }, { passive: false });
                     el.addEventListener('touchend', function(e) {
                         e.preventDefault();
-                        tap(el);
+                        handleTap(el);
                     });
-                    el.addEventListener('click', function(e) { tap(el); });
+                    el.addEventListener('click', function(e) { handleTap(el); });
                 });
+            }
+            function handleTap(el) {
+                var code = parseInt(el.getAttribute('data-code'));
+                if (!code || isNaN(code)) return;
+                var now = Date.now();
+                if (lastTapCode === code && now - lastTapTime < 300) {
+                    clearTimeout(tapTimer);
+                    lastTapTime = 0;
+                    lastTapCode = 0;
+                    sendMessage('prefectureLongPressed', code);
+                } else {
+                    lastTapTime = now;
+                    lastTapCode = code;
+                    tapTimer = setTimeout(function() {
+                        sendMessage('prefectureTapped', code);
+                        lastTapTime = 0;
+                        lastTapCode = 0;
+                    }, 300);
+                }
+            }
+            function sendMessage(action, code) {
+                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.mapHandler) {
+                    window.webkit.messageHandlers.mapHandler.postMessage({ action: action, prefectureCode: code });
+                }
             }
             function tap(el) {
                 var code = parseInt(el.getAttribute('data-code'));
                 if (!code || isNaN(code)) return;
-                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.mapHandler) {
-                    window.webkit.messageHandlers.mapHandler.postMessage({ action: 'prefectureTapped', prefectureCode: code });
-                }
+                sendMessage('prefectureTapped', code);
+            }
+            function longPress(el) {
+                var code = parseInt(el.getAttribute('data-code'));
+                if (!code || isNaN(code)) return;
+                sendMessage('prefectureLongPressed', code);
             }
             window.updateColors = function(colorMap) {
                 for (var code in colorMap) {
@@ -243,6 +283,14 @@ struct JapanMapWebViewWrapper: UIViewRepresentable {
             guard let pref = prefectures.first(where: { $0.id == code }) else { return }
             mapViewModel.focus(prefecture: pref)
         }
+        // ダブルタップコールバック（ブックマーク切り替え）
+        webView.onLongPress = { [prefectures, mapViewModel] code in
+            guard let pref = prefectures.first(where: { $0.id == code }) else { return }
+            pref.isBookmarked.toggle()
+            mapViewModel.bookmarkToast = pref.isBookmarked
+                ? "\(pref.name)を行きたいリストに追加"
+                : "\(pref.name)を行きたいリストから削除"
+        }
         // 色更新
         webView.updateColors(buildColorMap())
         webView.updateHighlight(mapViewModel.focusedPrefecture?.id)
@@ -279,7 +327,14 @@ struct JapanMapWebViewWrapper: UIViewRepresentable {
     private func buildColorMap() -> [String: String] {
         let allVisited = mapViewModel.isAllVisited(prefectures: prefectures)
         return Dictionary(uniqueKeysWithValues: prefectures.map { pref in
-            let hex = allVisited ? "#534AB7" : pref.visitColorHex()
+            let hex: String
+            if allVisited {
+                hex = "#534AB7"
+            } else if mapViewModel.showBookmarks && pref.isBookmarked && !pref.isVisited {
+                hex = "#FFD980"
+            } else {
+                hex = pref.visitColorHex()
+            }
             return ("\(pref.id)", hex)
         })
     }

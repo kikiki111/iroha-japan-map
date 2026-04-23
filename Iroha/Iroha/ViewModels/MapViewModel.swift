@@ -34,6 +34,12 @@ final class MapViewModel {
     /// 地図のスケール（半分制覇アニメーション用）
     var mapScale: CGFloat = 1.0
 
+    /// ブックマーク切り替え時のトースト表示
+    var bookmarkToast: String?
+
+    /// 行きたいリストの地図上表示
+    var showBookmarks: Bool = true
+
     // MARK: - Focus
 
     func focus(prefecture: Prefecture) {

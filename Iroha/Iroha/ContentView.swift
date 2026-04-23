@@ -10,56 +10,94 @@ import SwiftData
 
 struct ContentView: View {
     @State private var mapViewModel = MapViewModel()
+    @AppStorage("onboarding_done") private var onboardingDone = false
 
     var body: some View {
-        TabView {
-            MapTabView(mapViewModel: mapViewModel)
-                .tabItem { Label("地図", systemImage: "map") }
+        ZStack {
+            TabView {
+                MapTabView(mapViewModel: mapViewModel)
+                    .tabItem {
+                        Label("地図", systemImage: "globe.asia.australia")
+                    }
 
-            TimelineView(mapViewModel: mapViewModel)
-                .tabItem { Label("タイムライン", systemImage: "clock") }
+                TimelineView(mapViewModel: mapViewModel)
+                    .tabItem {
+                        Label("旅の記録", systemImage: "book")
+                    }
 
-            DetailTabView()
-                .tabItem { Label("詳細", systemImage: "list.bullet") }
+                ProfileView()
+                    .tabItem {
+                        Label("プロフ", systemImage: "person")
+                    }
+            }
+            .tint(Color.irohaFujiDk)
 
-            StatisticsTabView()
-                .tabItem { Label("統計", systemImage: "chart.bar") }
-
-            SettingsTabView()
-                .tabItem { Label("設定", systemImage: "gearshape") }
+            if !onboardingDone {
+                OnboardingView()
+                    .transition(.opacity)
+            }
         }
-        .tint(Color(hex: "#7F77DD"))
     }
 }
 
 // MARK: - MapTabView
 
-/// 地図タブ：StatsBarView + JapanMapView を NavigationStack でまとめ、シェアボタンを配置
+/// 地図タブ
 private struct MapTabView: View {
     @Bindable var mapViewModel: MapViewModel
 
     @Query(sort: \Prefecture.id) private var prefectures: [Prefecture]
 
-    /// マイルストーン検出用の前回状態
     @State private var previousVisitedCount: Int = 0
     @State private var previousRegionCounts: [Region: Int] = [:]
+    @State private var showSearch = false
+    @State private var selectedPrefecture: Prefecture?
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 12) {
+                VStack(spacing: 0) {
                     JapanMapView(mapViewModel: mapViewModel)
-                    StatsBarView(mapViewModel: mapViewModel)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 4)
+
+                    IrohaStatsBar(prefectures: prefectures, mapViewModel: mapViewModel)
                 }
-                .padding(.horizontal)
-                .padding(.top, 8)
             }
-            .background(Color.irohaBackground)
-            .navigationTitle("いろは")
+            .background(Color.irohaWashi)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
+            .overlay(alignment: .bottom) {
+                if let toast = mapViewModel.bookmarkToast {
+                    toastView(toast)
+                }
+            }
+            .overlay {
+                if showSearch {
+                    SearchOverlayView(
+                        prefectures: prefectures,
+                        isPresented: $showSearch,
+                        onSelect: { pref in
+                            showSearch = false
+                            selectedPrefecture = pref
+                        }
+                    )
+                }
+            }
+            .animation(.easeInOut(duration: 0.3), value: mapViewModel.bookmarkToast)
+            .sheet(item: $selectedPrefecture) { prefecture in
+                PrefectureDetailSheet(prefecture: prefecture)
+                    .presentationDetents([.fraction(0.70), .large])
+                    .presentationDragIndicator(.visible)
+                    .presentationCornerRadius(28)
+                    .presentationBackground(Color.irohaWashi)
+            }
             .sheet(item: $mapViewModel.focusedPrefecture) { prefecture in
-                AddVisitView(initialPrefectureName: prefecture.name)
-                    .presentationDetents([.large])
+                PrefectureDetailSheet(prefecture: prefecture)
+                    .presentationDetents([.fraction(0.70), .large])
+                    .presentationDragIndicator(.visible)
+                    .presentationCornerRadius(28)
+                    .presentationBackground(Color.irohaWashi)
             }
             .onAppear {
                 previousVisitedCount = mapViewModel.visitedPrefectureCount(prefectures: prefectures)
@@ -69,12 +107,8 @@ private struct MapTabView: View {
                 guard oldCounts != newCounts else { return }
                 let oldVisitedCount = previousVisitedCount
                 let oldRegionCounts = previousRegionCounts
-
-                // キャッシュ更新
                 previousVisitedCount = mapViewModel.visitedPrefectureCount(prefectures: prefectures)
                 previousRegionCounts = mapViewModel.regionVisitedCounts(prefectures: prefectures)
-
-                // マイルストーン検出
                 mapViewModel.detectMilestone(
                     oldVisitedCount: oldVisitedCount,
                     oldRegionCounts: oldRegionCounts,
@@ -88,18 +122,15 @@ private struct MapTabView: View {
         }
     }
 
-    // MARK: - Milestone animation execution
+    // MARK: - Milestone animation
 
     private func executeMilestoneAnimation(_ milestone: MilestoneType) {
         switch milestone {
         case .firstVisit:
-            // CSS transition が自動で 0.4s フェードを処理
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 mapViewModel.pendingMilestone = nil
             }
-
         case .halfConquest:
-            // 地図パルス: 1.0 → 1.02 → 1.0 (0.8s)
             withAnimation(.easeInOut(duration: 0.4)) {
                 mapViewModel.mapScale = 1.02
             }
@@ -111,39 +142,64 @@ private struct MapTabView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
                 mapViewModel.pendingMilestone = nil
             }
-
         case .regionConquest:
-            // JS flashPrefectures が JapanMapWebViewWrapper.updateUIView で実行される
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 mapViewModel.pendingMilestone = nil
             }
-
         case .nationalConquest:
-            // JS waveAnimation が JapanMapWebViewWrapper.updateUIView で実行される
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
                 mapViewModel.pendingMilestone = nil
             }
         }
     }
 
+    // MARK: - Toolbar
+
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            NurikakeText(text: "いろは", fontSize: 20, topColor: .irohaFuji, bottomColor: .irohaWashi3)
+        }
         ToolbarItem(placement: .navigationBarTrailing) {
             Button {
-                ShareManager.shareMap(prefectures: prefectures)
-            } label: {
-                Label("シェア", systemImage: "square.and.arrow.up")
-            }
-            .accessibilityLabel("地図をシェア")
-        }
-        if mapViewModel.focusedPrefecture != nil {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button("クリア") {
-                    mapViewModel.clearFocus()
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showSearch.toggle()
                 }
-                .accessibilityLabel("フォーカスをクリア")
+            } label: {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 14))
+                    .foregroundColor(showSearch ? .irohaFujiDk : .irohaSumi2)
+                    .frame(width: 28, height: 28)
+                    .background(
+                        showSearch
+                            ? Color.irohaFuji.opacity(0.14)
+                            : Color.irohaWashi2
+                    )
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(showSearch ? Color.irohaFujiLt : Color.irohaWashi3, lineWidth: 0.5))
             }
         }
+    }
+
+    // MARK: - Toast
+
+    private func toastView(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 14, weight: .medium))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(Color.irohaSumi.opacity(0.88))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.bottom, 20)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        mapViewModel.bookmarkToast = nil
+                    }
+                }
+            }
     }
 }
 

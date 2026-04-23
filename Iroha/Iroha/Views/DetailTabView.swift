@@ -9,16 +9,19 @@ import SwiftData
 /// 地方別の達成状況を一覧表示するタブ
 struct DetailTabView: View {
     @Query(sort: \Prefecture.id) private var prefectures: [Prefecture]
-
     @State private var selectedRegion: Region?
 
     private var visitedCount: Int { prefectures.filter(\.isVisited).count }
+    private var bookmarkedPrefectures: [Prefecture] { prefectures.filter(\.isBookmarked) }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
                     overallProgressCard
+                    if !bookmarkedPrefectures.isEmpty {
+                        bookmarkSection
+                    }
                     regionList
                 }
                 .padding()
@@ -50,6 +53,48 @@ struct DetailTabView: View {
         }
         .padding()
         .frame(maxWidth: .infinity)
+        .background(Color.irohaBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
+    }
+
+    // MARK: - Bookmarks
+
+    private var bookmarkSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("行きたいリスト")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                ForEach(bookmarkedPrefectures) { pref in
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(Color(hex: "#FFB800"))
+                            .frame(width: 8, height: 8)
+                        Text(pref.name)
+                            .font(.caption)
+                            .lineLimit(1)
+                        Spacer()
+                        Button {
+                            pref.isBookmarked = false
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Color(hex: "#FFB800").opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+            }
+        }
+        .padding()
         .background(Color.irohaBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)

@@ -39,7 +39,8 @@ private func seedPrefecturesIfNeeded(into context: ModelContext) {
     guard (try? context.fetch(descriptor))?.isEmpty == true else { return }
     for row in Prefecture.seedRows {
         context.insert(Prefecture(
-            id: row.id, name: row.name, region: row.region,
+            id: row.id, name: row.name, nameKana: row.kana,
+            region: row.region,
             latitude: row.lat, longitude: row.lon,
             distanceFromTokyo: row.dist
         ))
