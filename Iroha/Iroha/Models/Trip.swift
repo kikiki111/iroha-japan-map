@@ -6,7 +6,9 @@
 import Foundation
 
 /// A group of consecutive visits detected as belonging to the same trip.
-struct Trip: Identifiable {
+struct Trip: Identifiable, Equatable {
+    static func == (lhs: Trip, rhs: Trip) -> Bool { lhs.id == rhs.id }
+
     let id: UUID
     let visits: [Visit]
 
@@ -28,8 +30,15 @@ struct Trip: Identifiable {
         visits.map(\.effectiveEndDate).max() ?? .distantFuture
     }
 
-    /// Unique prefecture names visited on this trip, sorted alphabetically.
+    /// Whether this trip consists of a single visit.
+    var isSingleVisit: Bool { visits.count == 1 }
+
+    /// Unique prefecture names visited on this trip, in chronological order.
     var prefectureNames: [String] {
-        Array(Set(visits.map(\.prefectureName))).sorted()
+        var seen = Set<String>()
+        return visits.sorted { $0.startDate < $1.startDate }
+            .compactMap { visit in
+                seen.insert(visit.prefectureName).inserted ? visit.prefectureName : nil
+            }
     }
 }

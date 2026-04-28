@@ -13,6 +13,13 @@ struct NurikakeNumber: View {
     var fontSize: CGFloat = 36
     var topColor: Color = .irohaFujiDk
     var bottomColor: Color = .irohaWashi3
+    /// 塗りつぶし率（0.0〜1.0）。nil の場合はデフォルト48%
+    var ratio: Double? = nil
+
+    private var fillRatio: CGFloat {
+        if let ratio { return CGFloat(min(max(ratio, 0), 1)) }
+        return 0.48
+    }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -21,18 +28,20 @@ struct NurikakeNumber: View {
                 .font(.system(size: fontSize, weight: .light, design: .serif))
                 .foregroundColor(bottomColor)
 
-            // 上層：紫（上48%だけ表示）
-            Text(verbatim: "\(value)")
-                .font(.system(size: fontSize, weight: .light, design: .serif))
-                .foregroundColor(topColor)
-                .mask(
-                    VStack(spacing: 0) {
-                        Rectangle()
-                            .frame(height: fontSize * 0.48)
-                        Spacer(minLength: 0)
-                    }
-                    .frame(height: fontSize)
-                )
+            // 上層：紫（fillRatio 分だけ上から表示）
+            if fillRatio > 0 {
+                Text(verbatim: "\(value)")
+                    .font(.system(size: fontSize, weight: .light, design: .serif))
+                    .foregroundColor(topColor)
+                    .mask(
+                        VStack(spacing: 0) {
+                            Rectangle()
+                                .frame(height: fontSize * fillRatio)
+                            Spacer(minLength: 0)
+                        }
+                        .frame(height: fontSize)
+                    )
+            }
         }
     }
 }

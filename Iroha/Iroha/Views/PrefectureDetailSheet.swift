@@ -6,6 +6,7 @@
 
 import SwiftUI
 import SwiftData
+import PhotosUI
 
 /// 県詳細シート
 struct PrefectureDetailSheet: View {
@@ -79,7 +80,8 @@ struct PrefectureDetailSheet: View {
 
             // 訪問数（塗りかけ）
             VStack(spacing: 3) {
-                NurikakeNumber(value: prefecture.visitCount, fontSize: 44)
+                NurikakeNumber(value: prefecture.visitCount, fontSize: 44,
+                              ratio: min(Double(prefecture.visitCount) / 5.0, 1.0))
                 Text("回訪問")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.irohaSumi3)
@@ -263,85 +265,132 @@ struct VisitInputSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var visitDate = Date()
+    @State private var endDate = Date()
     @State private var selectedTag: VisitTag = .none
     @State private var memo = ""
+    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var photoImage: UIImage?
+    @State private var photoRemoved = false
 
     private var isEditing: Bool { editingVisit != nil }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                // Prefecture header
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(spacedKana(prefecture.nameKana))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.irohaSumi3)
-                        .tracking(2.5)
-                    Text(prefecture.name)
-                        .font(.system(size: 22, weight: .light, design: .serif))
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
-                .padding(.bottom, 12)
-
-                // Form
+            ScrollView {
                 VStack(spacing: 0) {
-                    // Date
-                    formField(label: "訪問日") {
-                        DatePicker("", selection: $visitDate, displayedComponents: .date)
-                            .datePickerStyle(.compact)
-                            .environment(\.locale, Locale(identifier: "ja_JP"))
-                            .labelsHidden()
+                    // Prefecture header
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(spacedKana(prefecture.nameKana))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.irohaSumi3)
+                            .tracking(2.5)
+                        Text(prefecture.name)
+                            .font(.system(size: 22, weight: .light, design: .serif))
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
 
-                    // Tag
-                    formField(label: "訪問スタイル") {
-                        HStack(spacing: 6) {
-                            ForEach([VisitTag.dayTrip, .stay, .lived], id: \.rawValue) { tag in
-                                Button {
-                                    selectedTag = selectedTag == tag ? .none : tag
-                                } label: {
-                                    Text(tag.displayName)
-                                        .font(.system(size: 14, weight: selectedTag == tag ? .bold : .medium))
-                                        .foregroundColor(selectedTag == tag ? .irohaFujiDk : .irohaSumi3)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 8)
-                                        .background(
-                                            selectedTag == tag
-                                                ? Color.irohaFuji.opacity(0.12)
-                                                : Color.irohaWashi2
-                                        )
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 8)
-                                                .stroke(
-                                                    selectedTag == tag ? Color.irohaFuji : Color.irohaWashi3,
-                                                    lineWidth: 0.5
-                                                )
-                                        )
-                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    // Form
+                    VStack(spacing: 0) {
+                        // Date
+                        formField(label: "訪問期間") {
+                            VStack(spacing: 6) {
+                                DatePicker("開始日", selection: $visitDate, displayedComponents: .date)
+                                    .datePickerStyle(.compact)
+                                    .environment(\.locale, Locale(identifier: "ja_JP"))
+                                DatePicker("帰着日", selection: $endDate, in: visitDate..., displayedComponents: .date)
+                                    .datePickerStyle(.compact)
+                                    .environment(\.locale, Locale(identifier: "ja_JP"))
+                            }
+                        }
+
+                        // Tag
+                        formField(label: "訪問スタイル") {
+                            HStack(spacing: 6) {
+                                ForEach([VisitTag.dayTrip, .stay, .lived], id: \.rawValue) { tag in
+                                    Button {
+                                        selectedTag = selectedTag == tag ? .none : tag
+                                    } label: {
+                                        Text(tag.displayName)
+                                            .font(.system(size: 14, weight: selectedTag == tag ? .bold : .medium))
+                                            .foregroundColor(selectedTag == tag ? .irohaFujiDk : .irohaSumi3)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 8)
+                                            .background(
+                                                selectedTag == tag
+                                                    ? Color.irohaFuji.opacity(0.12)
+                                                    : Color.irohaWashi2
+                                            )
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 8)
+                                                    .stroke(
+                                                        selectedTag == tag ? Color.irohaFuji : Color.irohaWashi3,
+                                                        lineWidth: 0.5
+                                                    )
+                                            )
+                                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    // Memo
-                    formField(label: "メモ") {
-                        TextField("旅の思い出を残しておこう…", text: $memo, axis: .vertical)
-                            .font(.system(size: 15))
-                            .frame(minHeight: 44)
-                            .padding(10)
-                            .background(.white)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color.irohaWashi3, lineWidth: 0.5)
-                            )
+                        // Photo
+                        formField(label: "写真（任意）") {
+                            VStack(spacing: 8) {
+                                if let photoImage {
+                                    Image(uiImage: photoImage)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(height: 160)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        .overlay(alignment: .topTrailing) {
+                                            Button {
+                                                self.photoImage = nil
+                                                selectedPhoto = nil
+                                                photoRemoved = true
+                                            } label: {
+                                                Image(systemName: "xmark.circle.fill")
+                                                    .font(.system(size: 22))
+                                                    .foregroundStyle(.white, .black.opacity(0.5))
+                                            }
+                                            .padding(6)
+                                        }
+                                }
+                                PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                                    Label(photoImage == nil ? "写真を追加" : "写真を変更", systemImage: "photo.on.rectangle.angled")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.irohaFujiDk)
+                                }
+                                .onChange(of: selectedPhoto) { _, newItem in
+                                    Task {
+                                        if let data = try? await newItem?.loadTransferable(type: Data.self),
+                                           let image = UIImage(data: data) {
+                                            photoImage = image
+                                            photoRemoved = false
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Memo
+                        formField(label: "メモ") {
+                            TextField("旅の思い出を残しておこう…", text: $memo, axis: .vertical)
+                                .font(.system(size: 15))
+                                .frame(minHeight: 44)
+                                .padding(10)
+                                .background(Color.irohaCard)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color.irohaWashi3, lineWidth: 0.5)
+                                )
+                        }
                     }
+                    .padding(.horizontal, 20)
                 }
-                .padding(.horizontal, 20)
-
-                Spacer()
             }
             .background(Color.irohaWashi)
             .navigationBarTitleDisplayMode(.inline)
@@ -364,12 +413,16 @@ struct VisitInputSheet: View {
             .onAppear {
                 if let visit = editingVisit {
                     visitDate = visit.startDate
+                    endDate = visit.effectiveEndDate
                     selectedTag = visit.effectiveTag
                     memo = visit.note
+                    if let filename = visit.photoFilename {
+                        photoImage = PhotoStorageManager.loadImage(filename: filename)
+                    }
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
         .presentationBackground(Color.irohaWashi)
     }
 
@@ -385,17 +438,38 @@ struct VisitInputSheet: View {
     }
 
     private func save() {
+        let computedEndDate: Date? = Calendar.current.isDate(endDate, inSameDayAs: visitDate) ? nil : endDate
         if let visit = editingVisit {
             visit.startDate = visitDate
+            visit.endDate = computedEndDate
             visit.tag = selectedTag
             visit.note = memo
+            // Photo handling
+            if photoRemoved {
+                if let oldFilename = visit.photoFilename {
+                    PhotoStorageManager.delete(filename: oldFilename)
+                }
+                visit.photoFilename = nil
+                visit.photoThumbnail = nil
+            } else if selectedPhoto != nil, let photoImage {
+                if let oldFilename = visit.photoFilename {
+                    PhotoStorageManager.delete(filename: oldFilename)
+                }
+                visit.photoFilename = PhotoStorageManager.save(image: photoImage)
+                visit.photoThumbnail = PhotoStorageManager.generateThumbnail(from: photoImage)
+            }
         } else {
             let visit = Visit(
                 prefectureName: prefecture.name,
                 startDate: visitDate,
+                endDate: computedEndDate,
                 note: memo,
                 tag: selectedTag
             )
+            if let photoImage {
+                visit.photoFilename = PhotoStorageManager.save(image: photoImage)
+                visit.photoThumbnail = PhotoStorageManager.generateThumbnail(from: photoImage)
+            }
             visit.prefecture = prefecture
             modelContext.insert(visit)
         }
