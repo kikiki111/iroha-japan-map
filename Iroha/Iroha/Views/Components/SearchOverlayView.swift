@@ -47,7 +47,7 @@ struct SearchOverlayView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(.white)
+            .background(Color.irohaCard)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
@@ -108,7 +108,7 @@ struct SearchOverlayView: View {
                         }
                     }
                 }
-                .background(.white)
+                .background(Color.irohaCard)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.irohaWashi3, lineWidth: 0.5))
                 .padding(.horizontal, 16)

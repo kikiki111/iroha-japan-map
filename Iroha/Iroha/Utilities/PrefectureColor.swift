@@ -26,33 +26,49 @@ extension Color {
     }
 }
 
+// MARK: - Adaptive color helper
+
+extension Color {
+    /// ライト/ダークで異なる色を返すヘルパー
+    static func adaptive(light: String, dark: String) -> Color {
+        Color(UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? UIColor(Color(hex: dark))
+                : UIColor(Color(hex: light))
+        })
+    }
+}
+
 // MARK: - Iroha theme colors
 
 extension Color {
-    // 背景・テキスト
-    static let irohaWashi     = Color(hex: "#F7F4EF")
-    static let irohaWashi2    = Color(hex: "#EDE8DF")
-    static let irohaWashi3    = Color(hex: "#E0D8CC")
-    static let irohaSumi      = Color(hex: "#1C1A2A")
-    static let irohaSumi2     = Color(hex: "#4A4760")
-    static let irohaSumi3     = Color(hex: "#9290A8")
+    // 背景・テキスト（ダークモード対応）
+    static let irohaWashi     = Color.adaptive(light: "#F7F4EF", dark: "#1A1826")
+    static let irohaWashi2    = Color.adaptive(light: "#EDE8DF", dark: "#242236")
+    static let irohaWashi3    = Color.adaptive(light: "#E0D8CC", dark: "#3A3750")
+    static let irohaSumi      = Color.adaptive(light: "#1C1A2A", dark: "#F0EDE8")
+    static let irohaSumi2     = Color.adaptive(light: "#4A4760", dark: "#C0BDD0")
+    static let irohaSumi3     = Color.adaptive(light: "#9290A8", dark: "#8886A0")
 
     // メインカラー（紫）
     static let irohaFuji      = Color(hex: "#7F77DD")
-    static let irohaFujiDk    = Color(hex: "#534AB7")
-    static let irohaFujiLt    = Color(hex: "#C8C4F0")
+    static let irohaFujiDk    = Color.adaptive(light: "#534AB7", dark: "#9F97EE")
+    static let irohaFujiLt    = Color.adaptive(light: "#C8C4F0", dark: "#4A4280")
     static let irohaFuji5     = Color(hex: "#3C3489")
 
     // 互換性
-    static let irohaBackground = Color(hex: "#F7F4EF")
-    static let irohaText       = Color(hex: "#2C2A4A")
+    static let irohaBackground = irohaWashi
+    static let irohaText       = irohaSumi
     static let irohaFlash      = Color(hex: "#AFA9EC")
+
+    // カード背景（設定画面などの .white 代替）
+    static let irohaCard      = Color.adaptive(light: "#FFFFFF", dark: "#242236")
 
     // 訪問回数カラーマップ
     static func visitColor(count: Int, isAllVisited: Bool = false) -> Color {
         if isAllVisited { return Color(hex: "#534AB7") }
         switch count {
-        case 0:    return Color(hex: "#E0D8CC")
+        case 0:    return irohaWashi3
         case 1:    return Color(hex: "#C8C4F0")
         case 2:    return Color(hex: "#9F97DD")
         case 3, 4: return Color(hex: "#7F77DD")

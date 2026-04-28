@@ -115,7 +115,7 @@ struct MemoryCardView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(.white)
+            .background(Color.irohaCard)
             .overlay(
                 Rectangle()
                     .stroke(Color.irohaWashi3, lineWidth: 0.5)

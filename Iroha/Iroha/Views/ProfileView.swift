@@ -105,7 +105,7 @@ struct ProfileView: View {
             profileColumn(value: conqueredRegionCount, label: "地方制覇")
         }
         .padding(.vertical, 10)
-        .background(.white)
+        .background(Color.irohaCard)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)

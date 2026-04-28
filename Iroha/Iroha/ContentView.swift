@@ -11,6 +11,15 @@ import SwiftData
 struct ContentView: View {
     @State private var mapViewModel = MapViewModel()
     @AppStorage("onboarding_done") private var onboardingDone = false
+    @AppStorage("appearance_mode") private var appearanceMode: Int = 0
+
+    private var colorScheme: ColorScheme? {
+        switch appearanceMode {
+        case 1: return .light
+        case 2: return .dark
+        default: return nil
+        }
+    }
 
     var body: some View {
         ZStack {
@@ -27,7 +36,7 @@ struct ContentView: View {
 
                 ProfileView()
                     .tabItem {
-                        Label("プロフ", systemImage: "person")
+                        Label("プロフィール", systemImage: "person")
                     }
             }
             .tint(Color.irohaFujiDk)
@@ -37,6 +46,7 @@ struct ContentView: View {
                     .transition(.opacity)
             }
         }
+        .preferredColorScheme(colorScheme)
     }
 }
 
