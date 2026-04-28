@@ -26,6 +26,14 @@ struct IrohaApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .task {
+                    MemoryNotificationManager.requestPermission()
+                    let context = sharedModelContainer.mainContext
+                    let descriptor = FetchDescriptor<Visit>()
+                    if let visits = try? context.fetch(descriptor) {
+                        MemoryNotificationManager.reschedule(visits: visits)
+                    }
+                }
         }
         .modelContainer(sharedModelContainer)
     }

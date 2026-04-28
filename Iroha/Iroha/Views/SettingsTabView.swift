@@ -13,8 +13,17 @@ struct SettingsView: View {
     @Query private var visits: [Visit]
     @Query private var prefectures: [Prefecture]
 
+    @AppStorage("appearance_mode") private var appearanceMode: Int = 0
     @State private var showResetConfirmation = false
     @State private var showResetFinalConfirmation = false
+
+    private var appearanceLabel: String {
+        switch appearanceMode {
+        case 1: return "ライト"
+        case 2: return "ダーク"
+        default: return "システム連動"
+        }
+    }
 
     var body: some View {
         ScrollView {
@@ -22,28 +31,18 @@ struct SettingsView: View {
                 // 表示
                 sectionHeader("表示")
                 settingsGroup {
-                    settingsRow(icon: "\u{25D1}", iconBg: LinearGradient(colors: [Color.irohaSumi2, Color.irohaSumi], startPoint: .topLeading, endPoint: .bottomTrailing), label: "ダークモード", value: "システム連動")
+                    appearanceRow
                 }
 
                 // 通知
                 sectionHeader("通知")
                 settingsGroup {
-                    settingsToggleRow(icon: "\u{2661}", iconBg: Color.irohaFuji, label: "記念日通知", key: "notify_anniversary")
-                    Divider().padding(.leading, 44)
-                    settingsToggleRow(icon: "\u{25C8}", iconBg: Color.irohaFujiDk, label: "今日の記憶", key: "notify_memory")
-                    Divider().padding(.leading, 44)
-                    settingsToggleRow(icon: "\u{23F0}", iconBg: Color(hex: "#C47A2A"), label: "旅リマインド", key: "notify_reminder", defaultOn: false)
+                    memoryNotificationRow
                 }
 
                 // データ
                 sectionHeader("データ")
                 settingsGroup {
-                    Button {
-                        // バックアップ機能（v1.1）
-                    } label: {
-                        settingsRow(icon: "\u{2193}", iconBg: Color(hex: "#1D9E75"), label: "バックアップ", value: "\u{203A}")
-                    }
-                    Divider().padding(.leading, 44)
                     Button(role: .destructive) {
                         showResetConfirmation = true
                     } label: {
@@ -97,6 +96,64 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - Memory notification
+
+    private var memoryNotificationRow: some View {
+        HStack(spacing: 10) {
+            settingsIcon(icon: "\u{25C8}", bg: Color.irohaFujiDk)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("今日の記憶")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(.irohaSumi)
+                Text("過去の同じ日の訪問を通知")
+                    .font(.system(size: 11))
+                    .foregroundColor(.irohaSumi3)
+            }
+            Spacer()
+            Toggle("", isOn: Binding(
+                get: { UserDefaults.standard.object(forKey: "notify_memory") as? Bool ?? true },
+                set: { newValue in
+                    UserDefaults.standard.set(newValue, forKey: "notify_memory")
+                    MemoryNotificationManager.reschedule(visits: visits)
+                }
+            ))
+            .labelsHidden()
+            .tint(.irohaFuji)
+            .scaleEffect(0.8)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 5)
+    }
+
+    // MARK: - Appearance
+
+    private var appearanceRow: some View {
+        HStack(spacing: 10) {
+            Text("\u{25D1}")
+                .font(.system(size: 14))
+                .foregroundColor(.white)
+                .frame(width: 26, height: 26)
+                .background(
+                    LinearGradient(colors: [Color.irohaSumi2, Color.irohaSumi],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            Text("ダークモード")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundColor(.irohaSumi)
+            Spacer()
+            Picker("", selection: $appearanceMode) {
+                Text("システム").tag(0)
+                Text("ライト").tag(1)
+                Text("ダーク").tag(2)
+            }
+            .pickerStyle(.menu)
+            .tint(.irohaSumi3)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 5)
+    }
+
     // MARK: - Components
 
     private func sectionHeader(_ title: String) -> some View {
@@ -114,7 +171,7 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             content()
         }
-        .background(.white)
+        .background(Color.irohaCard)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.irohaWashi3, lineWidth: 0.5))
         .padding(.horizontal, 14)
