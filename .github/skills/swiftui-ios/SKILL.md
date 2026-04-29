@@ -18,14 +18,26 @@ license: MIT
 ```swift
 // ✅ 正しい
 @Environment(\.modelContext) private var context
+@Query(sort: \Prefecture.id) private var prefectures: [Prefecture]
 
 // ❌ 間違い（直接インスタンス化しない）
 let context = ModelContext(container)
 ```
 
+### 本プロジェクトで使用中の SwiftUI パターン
+- `@Bindable var` — @Observable クラスの双方向バインディング
+- `PhotosPicker` — 写真選択（PhotosUI）
+- `.presentationDetents([.fraction(0.7), .large])` — シートの高さ制御
+- `.presentationBackground()` — シート背景カスタマイズ
+- `@AppStorage` — UserDefaults バインディング（テーマ設定、オンボーディング等）
+- `Layout` プロトコル — カスタムフローレイアウト（FlowLayout）
+- `ImageRenderer` — SwiftUI View → UIImage 変換（シェア機能）
+
 ### View の分割
-- body は 80 行以内。超えたら別 View に切り出す
+- body は 80 行以内。超えたら別 View / private computed property に切り出す
+- 大きい View は MARK コメントでセクション分割する
 
 ### アンチパターン
 - @Query を ViewModel に書く（View に書く）
 - バックグラウンドスレッドで UI を更新する
+- @Observable ViewModel を @State 以外で保持する
