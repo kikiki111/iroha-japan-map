@@ -14,26 +14,25 @@ enum TripDetector {
     /// - Parameter visits: An unsorted or sorted list of visits.
     /// - Returns: An array of `Trip` values in chronological order.
     static func detect(from visits: [Visit]) -> [Trip] {
-        let sorted = visits.sorted { $0.startDate < $1.startDate }
-        guard !sorted.isEmpty else { return [] }
+        let tripVisits = visits.sorted { $0.startDate < $1.startDate }
 
         var groups: [[Visit]] = []
-        var currentGroup: [Visit] = [sorted[0]]
 
-        for index in 1..<sorted.count {
-            let previous = sorted[index - 1].effectiveEndDate
-            let current  = sorted[index].startDate
-            let days = Calendar.current.dateComponents([.day], from: previous, to: current).day
-            // Treat a nil result (pathological calendar state) as a trip boundary to
-            // avoid silently merging visits whose interval cannot be determined.
-            if let days, days <= 3 {
-                currentGroup.append(sorted[index])
-            } else {
-                groups.append(currentGroup)
-                currentGroup = [sorted[index]]
+        if !tripVisits.isEmpty {
+            var currentGroup: [Visit] = [tripVisits[0]]
+            for index in 1..<tripVisits.count {
+                let previous = tripVisits[index - 1].effectiveEndDate
+                let current  = tripVisits[index].startDate
+                let days = Calendar.current.dateComponents([.day], from: previous, to: current).day
+                if let days, days <= 3 {
+                    currentGroup.append(tripVisits[index])
+                } else {
+                    groups.append(currentGroup)
+                    currentGroup = [tripVisits[index]]
+                }
             }
+            groups.append(currentGroup)
         }
-        groups.append(currentGroup)
 
         return groups.map { group -> Trip in
             let seed = "\(group[0].prefectureName)|\(group[0].startDate.timeIntervalSinceReferenceDate)"

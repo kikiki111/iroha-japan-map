@@ -11,12 +11,21 @@ import SwiftUI
 enum MilestoneType: Equatable {
     /// 初訪問（0→1）
     case firstVisit(prefectureCode: Int)
+    /// N県達成（5/10/15/20/30/35/40/45）
+    case countMilestone(count: Int)
     /// 半分制覇（25県）
     case halfConquest
     /// 地方制覇
     case regionConquest(Region)
     /// 全国制覇（47県）
     case nationalConquest
+}
+
+// MARK: - MapDisplayMode
+
+enum MapDisplayMode: String, CaseIterable {
+    case all = "旅した"
+    case unvisited = "これから"
 }
 
 // MARK: - MapViewModel
@@ -34,11 +43,14 @@ final class MapViewModel {
     /// 地図のスケール（半分制覇アニメーション用）
     var mapScale: CGFloat = 1.0
 
-    /// ブックマーク切り替え時のトースト表示
-    var bookmarkToast: String?
+    /// マイルストーン達成時のトースト
+    var milestoneToast: String?
 
-    /// 行きたいリストの地図上表示
-    var showBookmarks: Bool = true
+    /// 地図の表示モード
+    var displayMode: MapDisplayMode = .all
+
+    /// N県マイルストーンの閾値（降順）
+    static let countMilestones = [45, 40, 35, 30, 20, 15, 10, 5]
 
     // MARK: - Focus
 
@@ -97,6 +109,19 @@ final class MapViewModel {
                 if !milestoneShown(key) {
                     markMilestoneShown(key)
                     pendingMilestone = .regionConquest(region)
+                    return
+                }
+            }
+        }
+
+        for count in Self.countMilestones {
+            if newVisitedCount >= count, oldVisitedCount < count {
+                let key = "milestone_\(count)_shown"
+                if !milestoneShown(key) {
+                    for lower in Self.countMilestones where lower <= count {
+                        markMilestoneShown("milestone_\(lower)_shown")
+                    }
+                    pendingMilestone = .countMilestone(count: count)
                     return
                 }
             }
@@ -163,6 +188,55 @@ final class MapViewModel {
             result[region] = prefectures.filter { $0.region == region }.count
         }
         return result
+    }
+
+    // MARK: - Distance
+
+    private func distanceFromTokyo(_ target: Prefecture, prefectures: [Prefecture]) -> Double {
+        guard let tokyo = prefectures.first(where: { $0.id == 13 }) else {
+            return target.distanceFromTokyo
+        }
+        return DistanceCalculator.distance(from: tokyo, to: target)
+    }
+
+    func totalTravelDistance(visits: [Visit], prefectures: [Prefecture]) -> Int {
+        guard let tokyo = prefectures.first(where: { $0.id == 13 }) else { return 0 }
+        let trips = TripDetector.detect(from: visits)
+        return Int(DistanceCalculator.totalRouteDistance(trips: trips, home: tokyo, prefectures: prefectures))
+    }
+
+    func farthestVisitedPrefecture(prefectures: [Prefecture]) -> Prefecture? {
+        prefectures.filter(\.isVisited).max { distanceFromTokyo($0, prefectures: prefectures) < distanceFromTokyo($1, prefectures: prefectures) }
+    }
+
+    // MARK: - Region Suggestion
+
+    struct RegionSuggestion {
+        let region: Region
+        let remaining: Int
+        let unvisited: [Prefecture]
+    }
+
+    func closestRegionSuggestion(prefectures: [Prefecture]) -> RegionSuggestion? {
+        let progressList = regionProgressList(prefectures: prefectures)
+
+        let inProgress = progressList
+            .filter { $0.visited > 0 && $0.visited < $0.total }
+            .sorted {
+                let remA = $0.total - $0.visited
+                let remB = $1.total - $1.visited
+                if remA != remB { return remA < remB }
+                return $0.ratio > $1.ratio
+            }
+
+        guard let closest = inProgress.first else { return nil }
+        let unvisited = prefectures
+            .filter { $0.region == closest.region && !$0.isVisited }
+        return RegionSuggestion(
+            region: closest.region,
+            remaining: closest.total - closest.visited,
+            unvisited: unvisited
+        )
     }
 
     // MARK: - Private

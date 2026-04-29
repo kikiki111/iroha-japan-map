@@ -14,12 +14,11 @@ final class JapanMapWKWebView: WKWebView {
 
     /// 都道府県コード（1〜47）を受け取るタップコールバック
     var onTap: ((Int) -> Void)?
-    /// 都道府県コード（1〜47）を受け取るロングプレスコールバック
-    var onLongPress: ((Int) -> Void)?
 
     private var isPageLoaded = false
     private var latestColorMap: [String: String] = [:]
     private var latestHighlightCode: Int? // nil = ハイライトなし
+    private var isDarkMode = false
 
     init() {
         let config = WKWebViewConfiguration()
@@ -41,11 +40,23 @@ final class JapanMapWKWebView: WKWebView {
 
     func updateColors(_ colorMap: [String: String]) {
         latestColorMap = colorMap
-        if isPageLoaded { applyUpdates() }
+    }
+
+    func animateFill(code: Int, color: String) {
+        guard isPageLoaded else { return }
+        let js = "animateFill(\(code), '\(color)');"
+        evaluateJavaScript(js, completionHandler: nil)
     }
 
     func updateHighlight(_ code: Int?) {
         latestHighlightCode = code
+    }
+
+    func updateDarkMode(_ dark: Bool) {
+        isDarkMode = dark
+    }
+
+    func applyPendingUpdates() {
         if isPageLoaded { applyUpdates() }
     }
 
@@ -82,7 +93,8 @@ final class JapanMapWKWebView: WKWebView {
         guard let json = try? JSONSerialization.data(withJSONObject: latestColorMap),
               let jsonString = String(data: json, encoding: .utf8) else { return }
         let highlightArg = latestHighlightCode.map { "\($0)" } ?? "null"
-        let js = "updateColors(\(jsonString)); highlightPrefecture(\(highlightArg));"
+        let strokeColor = isDarkMode ? "#2A2840" : "white"
+        let js = "setStrokeColor('\(strokeColor)'); updateColors(\(jsonString)); highlightPrefecture(\(highlightArg));"
         evaluateJavaScript(js, completionHandler: nil)
     }
 
@@ -90,15 +102,9 @@ final class JapanMapWKWebView: WKWebView {
         guard let data = body as? [String: Any],
               let action = data["action"] as? String,
               let code = data["prefectureCode"] as? Int else { return }
-        switch action {
-        case "prefectureTapped":
+        if action == "prefectureTapped" {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             onTap?(code)
-        case "prefectureLongPressed":
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            onLongPress?(code)
-        default:
-            break
         }
     }
 
@@ -120,7 +126,11 @@ final class JapanMapWKWebView: WKWebView {
             stroke: white;
             stroke-width: 0.6;
             cursor: pointer;
-            transition: fill 0.4s ease-in-out;
+        }
+        @keyframes nurikake-glow {
+            0%   { filter: drop-shadow(0 0 8px rgba(127,119,221,0.8)); }
+            40%  { filter: drop-shadow(0 0 12px rgba(127,119,221,0.5)); }
+            100% { filter: drop-shadow(0 0 0px rgba(127,119,221,0)); }
         }
         </style>
         </head>
@@ -128,54 +138,32 @@ final class JapanMapWKWebView: WKWebView {
         \(svgContent)
         <script>
         (function() {
-            var lastTapTime = 0;
-            var lastTapCode = 0;
-            var tapTimer = null;
+            var usesTouch = false;
+            var defaultStroke = 'white';
             function setup() {
                 var els = document.querySelectorAll('.prefecture');
                 if (els.length === 0) { setTimeout(setup, 100); return; }
                 els.forEach(function(el) {
-                    el.addEventListener('touchstart', function(e) { e.preventDefault(); }, { passive: false });
+                    el.removeAttribute('stroke');
+                    el.removeAttribute('stroke-width');
+                    el.removeAttribute('fill');
+                    el.addEventListener('touchstart', function(e) { e.preventDefault(); usesTouch = true; }, { passive: false });
                     el.addEventListener('touchend', function(e) {
                         e.preventDefault();
                         handleTap(el);
                     });
-                    el.addEventListener('click', function(e) { handleTap(el); });
+                    el.addEventListener('click', function(e) { if (!usesTouch) handleTap(el); });
                 });
             }
             function handleTap(el) {
                 var code = parseInt(el.getAttribute('data-code'));
                 if (!code || isNaN(code)) return;
-                var now = Date.now();
-                if (lastTapCode === code && now - lastTapTime < 300) {
-                    clearTimeout(tapTimer);
-                    lastTapTime = 0;
-                    lastTapCode = 0;
-                    sendMessage('prefectureLongPressed', code);
-                } else {
-                    lastTapTime = now;
-                    lastTapCode = code;
-                    tapTimer = setTimeout(function() {
-                        sendMessage('prefectureTapped', code);
-                        lastTapTime = 0;
-                        lastTapCode = 0;
-                    }, 300);
-                }
+                sendMessage('prefectureTapped', code);
             }
             function sendMessage(action, code) {
                 if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.mapHandler) {
                     window.webkit.messageHandlers.mapHandler.postMessage({ action: action, prefectureCode: code });
                 }
-            }
-            function tap(el) {
-                var code = parseInt(el.getAttribute('data-code'));
-                if (!code || isNaN(code)) return;
-                sendMessage('prefectureTapped', code);
-            }
-            function longPress(el) {
-                var code = parseInt(el.getAttribute('data-code'));
-                if (!code || isNaN(code)) return;
-                sendMessage('prefectureLongPressed', code);
             }
             window.updateColors = function(colorMap) {
                 for (var code in colorMap) {
@@ -183,9 +171,17 @@ final class JapanMapWKWebView: WKWebView {
                     if (el) el.style.fill = colorMap[code];
                 }
             };
+            window.setStrokeColor = function(color) {
+                defaultStroke = color;
+                document.querySelectorAll('.prefecture').forEach(function(el) {
+                    if (el.style.strokeWidth !== '2.5') {
+                        el.style.stroke = defaultStroke;
+                    }
+                });
+            };
             window.highlightPrefecture = function(code) {
                 document.querySelectorAll('.prefecture').forEach(function(el) {
-                    el.style.stroke = 'white';
+                    el.style.stroke = defaultStroke;
                     el.style.strokeWidth = '0.6';
                 });
                 if (code !== null && code !== undefined) {
@@ -193,8 +189,23 @@ final class JapanMapWKWebView: WKWebView {
                     if (el) {
                         el.style.stroke = '#7F77DD';
                         el.style.strokeWidth = '2.5';
+                        el.parentNode.appendChild(el);
                     }
                 }
+            };
+            window.animateFill = function(code, targetColor) {
+                var el = document.querySelector('[data-code="' + code + '"]');
+                if (!el) return;
+                el.style.transition = 'none';
+                el.style.animation = 'nurikake-glow 0.8s ease-out';
+                setTimeout(function() {
+                    el.style.transition = 'fill 0.6s ease-out';
+                    el.style.fill = targetColor;
+                }, 20);
+                setTimeout(function() {
+                    el.style.transition = 'fill 0.4s ease-in-out';
+                    el.style.animation = '';
+                }, 800);
             };
             window.flashPrefectures = function(codes, color, durationMs, originalColors) {
                 codes.forEach(function(code) {
@@ -266,9 +277,13 @@ private final class WeakScriptHandler: NSObject, WKScriptMessageHandler {
 struct JapanMapWebViewWrapper: UIViewRepresentable {
     let prefectures: [Prefecture]
     var mapViewModel: MapViewModel
+    @Environment(\.colorScheme) private var colorScheme
 
     final class Coordinator {
         var lastExecutedMilestone: MilestoneType?
+        var previousDisplayMode: MapDisplayMode?
+        var previousColorMap: [String: String] = [:]
+        var deferredFillAnimations: [(code: Int, color: String)] = []
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -283,17 +298,51 @@ struct JapanMapWebViewWrapper: UIViewRepresentable {
             guard let pref = prefectures.first(where: { $0.id == code }) else { return }
             mapViewModel.focus(prefecture: pref)
         }
-        // ダブルタップコールバック（ブックマーク切り替え）
-        webView.onLongPress = { [prefectures, mapViewModel] code in
-            guard let pref = prefectures.first(where: { $0.id == code }) else { return }
-            pref.isBookmarked.toggle()
-            mapViewModel.bookmarkToast = pref.isBookmarked
-                ? "\(pref.name)を行きたいリストに追加"
-                : "\(pref.name)を行きたいリストから削除"
+        // 色更新（塗りかけアニメーション検出付き）
+        let newColorMap = buildColorMap()
+        let displayMode = mapViewModel.displayMode
+        let displayModeChanged = context.coordinator.previousDisplayMode.map { $0 != displayMode } ?? false
+        let unvisitedHex = "#DDDAD4"
+        let sheetOpen = mapViewModel.focusedPrefecture != nil
+
+        if displayModeChanged {
+            context.coordinator.deferredFillAnimations = []
+        } else {
+            // 新規訪問を検出してアニメーションキューに追加
+            for (code, newColor) in newColorMap {
+                let oldColor = context.coordinator.previousColorMap[code]
+                if let oldColor, oldColor == unvisitedHex, newColor != unvisitedHex {
+                    if let codeInt = Int(code) {
+                        let alreadyQueued = context.coordinator.deferredFillAnimations.contains { $0.code == codeInt }
+                        if !alreadyQueued {
+                            context.coordinator.deferredFillAnimations.append((codeInt, newColor))
+                        }
+                    }
+                }
+            }
         }
-        // 色更新
-        webView.updateColors(buildColorMap())
+
+        // シートが閉じた時にアニメーションを発火
+        var animatedCodes: Set<String> = []
+        if !sheetOpen && !context.coordinator.deferredFillAnimations.isEmpty {
+            for (code, color) in context.coordinator.deferredFillAnimations {
+                webView.animateFill(code: code, color: color)
+                animatedCodes.insert("\(code)")
+            }
+            context.coordinator.deferredFillAnimations = []
+        }
+
+        // アニメーション対象外の県は通常の色更新
+        let normalColorMap = newColorMap.filter { !animatedCodes.contains($0.key) }
+        if !normalColorMap.isEmpty {
+            webView.updateColors(normalColorMap)
+        }
+        context.coordinator.previousDisplayMode = displayMode
+        context.coordinator.previousColorMap = newColorMap
         webView.updateHighlight(mapViewModel.focusedPrefecture?.id)
+        webView.updateDarkMode(colorScheme == .dark)
+
+        webView.applyPendingUpdates()
 
         // マイルストーンアニメーション（重複実行防止）
         if let milestone = mapViewModel.pendingMilestone,
@@ -326,14 +375,18 @@ struct JapanMapWebViewWrapper: UIViewRepresentable {
 
     private func buildColorMap() -> [String: String] {
         let allVisited = mapViewModel.isAllVisited(prefectures: prefectures)
+        let mode = mapViewModel.displayMode
         return Dictionary(uniqueKeysWithValues: prefectures.map { pref in
             let hex: String
             if allVisited {
                 hex = "#534AB7"
-            } else if mapViewModel.showBookmarks && pref.isBookmarked && !pref.isVisited {
-                hex = "#FFD980"
             } else {
-                hex = pref.visitColorHex()
+                switch mode {
+                case .all:
+                    hex = pref.visitColorHex()
+                case .unvisited:
+                    hex = pref.isVisited ? "#DDDAD4" : "#9B9890"
+                }
             }
             return ("\(pref.id)", hex)
         })

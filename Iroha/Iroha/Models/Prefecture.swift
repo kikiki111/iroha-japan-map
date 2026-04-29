@@ -10,19 +10,15 @@ import SwiftData
 @Model
 final class Prefecture {
     /// 都道府県コード（1〜47）
-    var id: Int
-    var name: String
+    var id: Int = 0
+    var name: String = ""
     /// 読み仮名（ひらがな）
     var nameKana: String = ""
-    var region: Region
-    var latitude: Double
-    var longitude: Double
+    var region: Region = Region.kanto
+    var latitude: Double = 0
+    var longitude: Double = 0
     /// 東京からの直線距離（km）
-    var distanceFromTokyo: Double
-    /// 「行きたい」フラグ
-    var isWanted: Bool = false
-    /// 「行きたい」ブックマーク（旧名。互換性のため残す）
-    var isBookmarked: Bool = false
+    var distanceFromTokyo: Double = 0
 
     @Relationship(deleteRule: .cascade, inverse: \Visit.prefecture)
     var visits: [Visit] = []

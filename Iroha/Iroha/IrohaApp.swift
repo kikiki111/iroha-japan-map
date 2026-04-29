@@ -12,7 +12,11 @@ import SwiftData
 struct IrohaApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([Prefecture.self, Visit.self])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+        let modelConfiguration = ModelConfiguration(
+            schema: schema,
+            isStoredInMemoryOnly: false,
+            cloudKitDatabase: .none
+        )
 
         do {
             let container = try ModelContainer(for: schema, configurations: [modelConfiguration])
@@ -26,14 +30,7 @@ struct IrohaApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .task {
-                    MemoryNotificationManager.requestPermission()
-                    let context = sharedModelContainer.mainContext
-                    let descriptor = FetchDescriptor<Visit>()
-                    if let visits = try? context.fetch(descriptor) {
-                        MemoryNotificationManager.reschedule(visits: visits)
-                    }
-                }
+                .environment(\.locale, Locale(identifier: "ja_JP"))
         }
         .modelContainer(sharedModelContainer)
     }
@@ -41,17 +38,24 @@ struct IrohaApp: App {
 
 // MARK: - Prefecture seeding
 
-/// DB に Prefecture が 1 件もない場合に全 47 件を挿入する
+/// DB に不足している Prefecture を補完する
 private func seedPrefecturesIfNeeded(into context: ModelContext) {
     let descriptor = FetchDescriptor<Prefecture>()
-    guard (try? context.fetch(descriptor))?.isEmpty == true else { return }
-    for row in Prefecture.seedRows {
+    let existing = (try? context.fetch(descriptor)) ?? []
+    let existingIDs = Set(existing.map(\.id))
+    var didInsert = false
+
+    for row in Prefecture.seedRows where !existingIDs.contains(row.id) {
         context.insert(Prefecture(
             id: row.id, name: row.name, nameKana: row.kana,
             region: row.region,
             latitude: row.lat, longitude: row.lon,
             distanceFromTokyo: row.dist
         ))
+        didInsert = true
     }
-    try? context.save()
+
+    if didInsert {
+        try? context.save()
+    }
 }

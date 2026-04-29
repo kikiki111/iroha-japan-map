@@ -15,6 +15,7 @@ struct JapanMapView: View {
 
     var body: some View {
         JapanMapWebViewWrapper(prefectures: prefectures, mapViewModel: mapViewModel)
+            .transaction { $0.animation = nil }
             .aspectRatio(0.9, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)

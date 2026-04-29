@@ -33,6 +33,11 @@ struct Trip: Identifiable, Equatable {
     /// Whether this trip consists of a single visit.
     var isSingleVisit: Bool { visits.count == 1 }
 
+    var tripName: String {
+        visits.sorted { $0.startDate < $1.startDate }
+            .first(where: { !$0.tripName.isEmpty })?.tripName ?? ""
+    }
+
     /// Unique prefecture names visited on this trip, in chronological order.
     var prefectureNames: [String] {
         var seen = Set<String>()

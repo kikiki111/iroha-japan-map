@@ -6,7 +6,6 @@
 
 import SwiftUI
 import SwiftData
-import PhotosUI
 
 /// 県詳細シート
 struct PrefectureDetailSheet: View {
@@ -15,43 +14,99 @@ struct PrefectureDetailSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
+    @Query(sort: \Prefecture.id) private var allPrefectures: [Prefecture]
+
     @State private var showAddVisit = false
     @State private var editingVisit: Visit?
     @State private var showDeleteConfirmation = false
     @State private var visitToDelete: Visit?
+    @State private var fullScreenPhoto: UIImage?
+    @State private var showPhotoLoadError = false
 
     private var sortedVisits: [Visit] {
         prefecture.visits.sorted { $0.startDate > $1.startDate }
     }
 
+    private var allPhotoItems: [(filename: String, thumbnail: Data)] {
+        sortedVisits.flatMap { visit in
+            zip(visit.allPhotoFilenames, visit.allPhotoThumbnails).map { ($0, $1) }
+        }
+    }
+
     var body: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                headerSection
-                quickRecordButton
-                addDetailButton
-                visitList
-            }
-        }
-        .sheet(isPresented: $showAddVisit) {
-            VisitInputSheet(prefecture: prefecture, editingVisit: nil)
-        }
-        .sheet(item: $editingVisit) { visit in
-            VisitInputSheet(prefecture: prefecture, editingVisit: visit)
-        }
-        .alert("訪問記録を削除しますか？", isPresented: $showDeleteConfirmation) {
-            Button("キャンセル", role: .cancel) {}
-            Button("削除する", role: .destructive) {
-                if let visit = visitToDelete {
-                    if let filename = visit.photoFilename {
-                        PhotoStorageManager.delete(filename: filename)
-                    }
-                    modelContext.delete(visit)
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 0) {
+                    headerSection
+                    photoGallery
+                    quickRecordButton
+                    addDetailButton
+                    visitList
                 }
             }
-        } message: {
-            Text("この操作は元に戻せません")
+            .navigationBarTitleDisplayMode(.inline)
+            .sheet(isPresented: $showAddVisit) {
+                VisitFormView(prefectures: allPrefectures, prefecture: prefecture, editingVisit: nil)
+                    .environment(\.locale, Locale(identifier: "ja_JP"))
+            }
+            .sheet(item: $editingVisit) { visit in
+                VisitFormView(prefectures: allPrefectures, prefecture: prefecture, editingVisit: visit)
+                    .environment(\.locale, Locale(identifier: "ja_JP"))
+            }
+            .alert("旅行記録を削除しますか？", isPresented: $showDeleteConfirmation) {
+                Button("キャンセル", role: .cancel) {}
+                Button("削除", role: .destructive) {
+                    if let visit = visitToDelete {
+                        let filenames = visit.allPhotoFilenames
+                        modelContext.delete(visit)
+                        if (try? modelContext.save()) != nil {
+                            for filename in filenames {
+                                PhotoStorageManager.delete(filename: filename)
+                            }
+                        }
+                    }
+                }
+            } message: {
+                Text("この操作は元に戻せません")
+            }
+            .alert("写真を読み込めませんでした", isPresented: $showPhotoLoadError) {
+                Button("OK") {}
+            } message: {
+                Text("写真ファイルが見つからないか、開けない状態です。")
+            }
         }
+        .overlay {
+            if let photo = fullScreenPhoto {
+                ZStack {
+                    Color.black.ignoresSafeArea()
+                    Image(uiImage: photo)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Button {
+                                withAnimation(.easeOut(duration: 0.2)) { fullScreenPhoto = nil }
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 28))
+                                    .foregroundStyle(.white, .white.opacity(0.3))
+                            }
+                            .padding(16)
+                            .accessibilityLabel("写真を閉じる")
+                        }
+                        Spacer()
+                    }
+                }
+                .onTapGesture {
+                    withAnimation(.easeOut(duration: 0.2)) { fullScreenPhoto = nil }
+                }
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: fullScreenPhoto != nil)
+        .interactiveDismissDisabled(fullScreenPhoto != nil)
     }
 
     // MARK: - Header
@@ -71,18 +126,18 @@ struct PrefectureDetailSheet: View {
                     .foregroundColor(.irohaSumi)
 
                 // 地方名
-                Text("\(prefecture.region.localizedName)地方 \u{00B7} \(prefecture.id)")
+                Text("\(prefecture.region.localizedName)地方")
                     .font(.system(size: 13))
                     .foregroundColor(.irohaSumi3)
             }
 
             Spacer()
 
-            // 訪問数（塗りかけ）
             VStack(spacing: 3) {
+                // 訪問数（塗りかけ）
                 NurikakeNumber(value: prefecture.visitCount, fontSize: 44,
                               ratio: min(Double(prefecture.visitCount) / 5.0, 1.0))
-                Text("回訪問")
+                Text("回旅行")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.irohaSumi3)
                     .tracking(1)
@@ -93,42 +148,105 @@ struct PrefectureDetailSheet: View {
         .border(width: 0.5, edges: [.bottom], color: Color.irohaSumi.opacity(0.07))
     }
 
+    // MARK: - Photo gallery
+
+    @ViewBuilder
+    private var photoGallery: some View {
+        let items = allPhotoItems
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("写真")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.irohaSumi3)
+                        .tracking(1)
+                    Spacer()
+                    Text("\(items.count)枚")
+                        .font(.system(size: 12))
+                        .foregroundColor(.irohaSumi3)
+                }
+                .padding(.horizontal, 20)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(Array(items.enumerated()), id: \.element.filename) { _, item in
+                            if let uiImage = UIImage(data: item.thumbnail) {
+                                Button {
+                                    openPhoto(filename: item.filename)
+                                } label: {
+                                    Image(uiImage: uiImage)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 72, height: 72)
+                                        .clipped()
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                }
+            }
+            .padding(.top, 10)
+            .border(width: 0.5, edges: [.bottom], color: Color.irohaSumi.opacity(0.07))
+        }
+    }
+
     // MARK: - Quick record button
 
+    private var todayVisit: Visit? {
+        let calendar = Calendar.current
+        return prefecture.visits.first { calendar.isDateInToday($0.startDate) }
+    }
+
     private var quickRecordButton: some View {
-        Button {
-            let visit = Visit(prefectureName: prefecture.name, startDate: Date())
-            visit.prefecture = prefecture
-            modelContext.insert(visit)
-        } label: {
-            HStack(spacing: 10) {
-                Text("＋")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white)
-                    .frame(width: 26, height: 26)
-                    .background(.white.opacity(0.22))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("今日の訪問を記録")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(.white)
-                    Text("\(Date().formatted(date: .long, time: .omitted)) \u{00B7} 1タップで保存")
-                        .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.75))
+        Group {
+            if let existing = todayVisit {
+                Button {
+                    editingVisit = existing
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "pencil.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundColor(.white)
+                        Text("今日の記録を編集")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.white)
+                        Spacer()
+                        Text(Date().formatted(.dateTime.month().day().locale(Locale(identifier: "ja_JP"))))
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.irohaFuji.opacity(0.7))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
-
-                Spacer()
-
-                Text("\u{203A}")
-                    .font(.system(size: 16))
-                    .foregroundColor(.white.opacity(0.7))
+            } else {
+                Button {
+                    let visit = Visit(prefectureName: prefecture.name, startDate: Date())
+                    visit.prefecture = prefecture
+                    modelContext.insert(visit)
+                    try? modelContext.save()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundColor(.white)
+                        Text("今日の旅行を記録")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.white)
+                        Spacer()
+                        Text(Date().formatted(.dateTime.month().day().locale(Locale(identifier: "ja_JP"))))
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.irohaFuji)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(Color.irohaFuji)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .shadow(color: Color.irohaFuji.opacity(0.28), radius: 6, x: 0, y: 4)
         }
         .padding(.horizontal, 20)
         .padding(.top, 10)
@@ -162,31 +280,17 @@ struct PrefectureDetailSheet: View {
     // MARK: - Visit list
 
     private var visitList: some View {
-        List {
+        LazyVStack(spacing: 0) {
             ForEach(Array(sortedVisits.enumerated()), id: \.element.id) { index, visit in
                 visitCard(visit: visit, index: index)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
-                    .listRowSeparatorTint(Color.irohaSumi.opacity(0.07))
-                    .listRowBackground(Color.clear)
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            visitToDelete = visit
-                            showDeleteConfirmation = true
-                        } label: {
-                            Label("削除", systemImage: "trash")
-                        }
-                        Button {
-                            editingVisit = visit
-                        } label: {
-                            Label("編集", systemImage: "pencil")
-                        }
-                        .tint(Color.irohaFuji)
-                    }
+                    .padding(.horizontal, 20)
+                if index < sortedVisits.count - 1 {
+                    Divider()
+                        .padding(.leading, 40)
+                        .padding(.trailing, 20)
+                }
             }
         }
-        .listStyle(.plain)
-        .scrollDisabled(true)
-        .frame(minHeight: CGFloat(sortedVisits.count) * 60)
         .padding(.top, 6)
     }
 
@@ -200,12 +304,35 @@ struct PrefectureDetailSheet: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(visit.startDate.formatted(date: .abbreviated, time: .omitted))
+                    Text(visit.startDate.formatted(.dateTime.year().month().day().locale(Locale(identifier: "ja_JP"))))
                         .font(.system(size: 15, weight: .bold))
 
                     if visit.effectiveTag != .none {
                         VisitTagBadge(tag: visit.effectiveTag)
                     }
+                    if visit.effectiveMood != .none {
+                        VisitMoodBadge(mood: visit.effectiveMood)
+                    }
+                    VisitTransportBadge(transports: visit.effectiveTransports)
+                    VisitCompanionBadge(companions: visit.companions)
+                }
+
+                if visit.hasLocation {
+                    HStack(spacing: 3) {
+                        Image(systemName: "mappin")
+                            .font(.system(size: 10))
+                            .foregroundColor(.irohaSumi3)
+                        Text(visit.location)
+                            .font(.system(size: 12))
+                            .foregroundColor(.irohaSumi2)
+                            .lineLimit(1)
+                    }
+                }
+
+                if !visit.tripName.isEmpty {
+                    Text(visit.tripName)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.irohaFuji)
                 }
 
                 if !visit.note.isEmpty {
@@ -221,9 +348,38 @@ struct PrefectureDetailSheet: View {
             }
 
             Spacer()
+
+            if let thumbnailData = visit.allPhotoThumbnails.first,
+               let uiImage = UIImage(data: thumbnailData) {
+                Button {
+                    if let filename = visit.allPhotoFilenames.first {
+                        openPhoto(filename: filename)
+                    }
+                } label: {
+                    ZStack {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 40, height: 40)
+                            .clipped()
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        if visit.allPhotoFilenames.count > 1 {
+                            Text("+\(visit.allPhotoFilenames.count - 1)")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 40, height: 40)
+                                .background(Color.black.opacity(0.35))
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                    }
+                }
+            }
         }
         .padding(.vertical, 8)
         .contentShape(Rectangle())
+        .onTapGesture {
+            editingVisit = visit
+        }
         .contextMenu {
             Button {
                 editingVisit = visit
@@ -244,6 +400,14 @@ struct PrefectureDetailSheet: View {
     private func spacedKana(_ kana: String) -> String {
         kana.map { String($0) }.joined(separator: " ")
     }
+
+    private func openPhoto(filename: String) {
+        if let image = PhotoStorageManager.loadImage(filename: filename) {
+            fullScreenPhoto = image
+        } else {
+            showPhotoLoadError = true
+        }
+    }
 }
 
 // MARK: - Text line height extension
@@ -251,233 +415,6 @@ struct PrefectureDetailSheet: View {
 extension View {
     func lineHeight(_ multiplier: CGFloat) -> some View {
         self.lineSpacing((multiplier - 1) * 13)
-    }
-}
-
-// MARK: - VisitInputSheet
-
-/// 訪問の記録 / 編集シート
-struct VisitInputSheet: View {
-    let prefecture: Prefecture
-    let editingVisit: Visit?
-
-    @Environment(\.modelContext) private var modelContext
-    @Environment(\.dismiss) private var dismiss
-
-    @State private var visitDate = Date()
-    @State private var endDate = Date()
-    @State private var selectedTag: VisitTag = .none
-    @State private var memo = ""
-    @State private var selectedPhoto: PhotosPickerItem?
-    @State private var photoImage: UIImage?
-    @State private var photoRemoved = false
-
-    private var isEditing: Bool { editingVisit != nil }
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 0) {
-                    // Prefecture header
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(spacedKana(prefecture.nameKana))
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.irohaSumi3)
-                            .tracking(2.5)
-                        Text(prefecture.name)
-                            .font(.system(size: 22, weight: .light, design: .serif))
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 8)
-                    .padding(.bottom, 12)
-
-                    // Form
-                    VStack(spacing: 0) {
-                        // Date
-                        formField(label: "訪問期間") {
-                            VStack(spacing: 6) {
-                                DatePicker("開始日", selection: $visitDate, displayedComponents: .date)
-                                    .datePickerStyle(.compact)
-                                    .environment(\.locale, Locale(identifier: "ja_JP"))
-                                DatePicker("帰着日", selection: $endDate, in: visitDate..., displayedComponents: .date)
-                                    .datePickerStyle(.compact)
-                                    .environment(\.locale, Locale(identifier: "ja_JP"))
-                            }
-                        }
-
-                        // Tag
-                        formField(label: "訪問スタイル") {
-                            HStack(spacing: 6) {
-                                ForEach([VisitTag.dayTrip, .stay, .lived], id: \.rawValue) { tag in
-                                    Button {
-                                        selectedTag = selectedTag == tag ? .none : tag
-                                    } label: {
-                                        Text(tag.displayName)
-                                            .font(.system(size: 14, weight: selectedTag == tag ? .bold : .medium))
-                                            .foregroundColor(selectedTag == tag ? .irohaFujiDk : .irohaSumi3)
-                                            .frame(maxWidth: .infinity)
-                                            .padding(.vertical, 8)
-                                            .background(
-                                                selectedTag == tag
-                                                    ? Color.irohaFuji.opacity(0.12)
-                                                    : Color.irohaWashi2
-                                            )
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 8)
-                                                    .stroke(
-                                                        selectedTag == tag ? Color.irohaFuji : Color.irohaWashi3,
-                                                        lineWidth: 0.5
-                                                    )
-                                            )
-                                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                                    }
-                                }
-                            }
-                        }
-
-                        // Photo
-                        formField(label: "写真（任意）") {
-                            VStack(spacing: 8) {
-                                if let photoImage {
-                                    Image(uiImage: photoImage)
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(height: 160)
-                                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                                        .overlay(alignment: .topTrailing) {
-                                            Button {
-                                                self.photoImage = nil
-                                                selectedPhoto = nil
-                                                photoRemoved = true
-                                            } label: {
-                                                Image(systemName: "xmark.circle.fill")
-                                                    .font(.system(size: 22))
-                                                    .foregroundStyle(.white, .black.opacity(0.5))
-                                            }
-                                            .padding(6)
-                                        }
-                                }
-                                PhotosPicker(selection: $selectedPhoto, matching: .images) {
-                                    Label(photoImage == nil ? "写真を追加" : "写真を変更", systemImage: "photo.on.rectangle.angled")
-                                        .font(.system(size: 14))
-                                        .foregroundColor(.irohaFujiDk)
-                                }
-                                .onChange(of: selectedPhoto) { _, newItem in
-                                    Task {
-                                        if let data = try? await newItem?.loadTransferable(type: Data.self),
-                                           let image = UIImage(data: data) {
-                                            photoImage = image
-                                            photoRemoved = false
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Memo
-                        formField(label: "メモ") {
-                            TextField("旅の思い出を残しておこう…", text: $memo, axis: .vertical)
-                                .font(.system(size: 15))
-                                .frame(minHeight: 44)
-                                .padding(10)
-                                .background(Color.irohaCard)
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(Color.irohaWashi3, lineWidth: 0.5)
-                                )
-                        }
-                    }
-                    .padding(.horizontal, 20)
-                }
-            }
-            .background(Color.irohaWashi)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text(isEditing ? "訪問を編集" : "訪問を記録")
-                        .font(.system(size: 16, weight: .bold))
-                }
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("キャンセル") { dismiss() }
-                        .font(.system(size: 15))
-                        .foregroundColor(.irohaSumi3)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { save() }
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(.irohaFujiDk)
-                }
-            }
-            .onAppear {
-                if let visit = editingVisit {
-                    visitDate = visit.startDate
-                    endDate = visit.effectiveEndDate
-                    selectedTag = visit.effectiveTag
-                    memo = visit.note
-                    if let filename = visit.photoFilename {
-                        photoImage = PhotoStorageManager.loadImage(filename: filename)
-                    }
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
-        .presentationBackground(Color.irohaWashi)
-    }
-
-    private func formField<Content: View>(label: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(label)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.irohaSumi3)
-                .tracking(1)
-            content()
-        }
-        .padding(.bottom, 12)
-    }
-
-    private func save() {
-        let computedEndDate: Date? = Calendar.current.isDate(endDate, inSameDayAs: visitDate) ? nil : endDate
-        if let visit = editingVisit {
-            visit.startDate = visitDate
-            visit.endDate = computedEndDate
-            visit.tag = selectedTag
-            visit.note = memo
-            // Photo handling
-            if photoRemoved {
-                if let oldFilename = visit.photoFilename {
-                    PhotoStorageManager.delete(filename: oldFilename)
-                }
-                visit.photoFilename = nil
-                visit.photoThumbnail = nil
-            } else if selectedPhoto != nil, let photoImage {
-                if let oldFilename = visit.photoFilename {
-                    PhotoStorageManager.delete(filename: oldFilename)
-                }
-                visit.photoFilename = PhotoStorageManager.save(image: photoImage)
-                visit.photoThumbnail = PhotoStorageManager.generateThumbnail(from: photoImage)
-            }
-        } else {
-            let visit = Visit(
-                prefectureName: prefecture.name,
-                startDate: visitDate,
-                endDate: computedEndDate,
-                note: memo,
-                tag: selectedTag
-            )
-            if let photoImage {
-                visit.photoFilename = PhotoStorageManager.save(image: photoImage)
-                visit.photoThumbnail = PhotoStorageManager.generateThumbnail(from: photoImage)
-            }
-            visit.prefecture = prefecture
-            modelContext.insert(visit)
-        }
-        dismiss()
-    }
-
-    private func spacedKana(_ kana: String) -> String {
-        kana.map { String($0) }.joined(separator: " ")
     }
 }
 

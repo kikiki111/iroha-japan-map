@@ -22,7 +22,7 @@ struct IrohaStatsBar: View {
         VStack(spacing: 0) {
             // Main stats row
             HStack(alignment: .bottom, spacing: 5) {
-                NurikakeNumber(value: visitedCount, fontSize: 36)
+                NurikakeNumber(value: visitedCount, fontSize: 36, ratio: ratio)
                 Text("/ 47")
                     .font(.system(size: 14))
                     .foregroundColor(.irohaSumi3)
@@ -34,7 +34,7 @@ struct IrohaStatsBar: View {
                     .padding(.bottom, 5)
             }
             .padding(.horizontal, 16)
-            .padding(.top, 10)
+            .padding(.top, 2)
 
             // Progress bar
             GeometryReader { geo in
@@ -58,21 +58,26 @@ struct IrohaStatsBar: View {
             .padding(.top, 5)
 
             // 8-region dots
-            HStack(spacing: 6) {
+            HStack(spacing: 0) {
                 ForEach(mapViewModel.regionProgressList(prefectures: prefectures).reversed()) { progress in
-                    regionDot(progress: progress)
-                        .onTapGesture {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                if selectedRegion?.id == progress.id {
-                                    selectedRegion = nil
-                                } else {
-                                    selectedRegion = progress
-                                }
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            if selectedRegion?.id == progress.id {
+                                selectedRegion = nil
+                            } else {
+                                selectedRegion = progress
                             }
                         }
+                    } label: {
+                        regionDot(progress: progress)
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(progress.region.localizedName) \(progress.visited)/\(progress.total)")
+                    .accessibilityAddTraits(.isButton)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 8)
             .padding(.top, 6)
             .padding(.bottom, 4)
 

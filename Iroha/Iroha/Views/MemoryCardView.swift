@@ -2,16 +2,19 @@
 //  MemoryCardView.swift
 //  Iroha
 //
-//  「◯年前の今日」の訪問を表示するメモリーカード
+//  「◯年前の今日」の旅行を表示するメモリーカード
 
 import SwiftUI
 import SwiftData
 
-/// 「◯年前の今日」の訪問を表示するメモリーカード
 struct MemoryCardView: View {
+    var onTap: ((Visit) -> Void)?
+
     @Query(sort: \Visit.startDate) private var visits: [Visit]
+    @AppStorage("show_memory_card") private var showMemoryCard = true
 
     @State private var dismissed = false
+    @State private var currentIndex = 0
 
     private var todayMemories: [MemoryItem] {
         let calendar = Calendar.current
@@ -29,36 +32,72 @@ struct MemoryCardView: View {
     }
 
     var body: some View {
-        if !dismissed, let memory = todayMemories.first {
-            memoryCard(memory)
-                .transition(.asymmetric(
-                    insertion: .opacity,
-                    removal: .opacity.combined(with: .scale(scale: 0.95))
-                ))
+        let memories = todayMemories
+        if showMemoryCard, !dismissed, !memories.isEmpty {
+            VStack(spacing: 0) {
+                TabView(selection: $currentIndex) {
+                    ForEach(Array(memories.enumerated()), id: \.element.visit.id) { index, memory in
+                        memoryCard(memory)
+                            .tag(index)
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: memories.count > 1 ? .automatic : .never))
+                .frame(height: 195)
+
+                if memories.count > 1 {
+                    HStack(spacing: 4) {
+                        ForEach(0..<memories.count, id: \.self) { index in
+                            Circle()
+                                .fill(index == currentIndex ? Color.irohaFuji : Color.irohaSumi3.opacity(0.25))
+                                .frame(width: 6, height: 6)
+                        }
+                    }
+                    .padding(.top, 4)
+                    .padding(.bottom, 2)
+                }
+            }
+            .transition(.asymmetric(
+                insertion: .opacity,
+                removal: .opacity.combined(with: .scale(scale: 0.95))
+            ))
         }
     }
 
     private func memoryCard(_ memory: MemoryItem) -> some View {
         VStack(spacing: 0) {
-            // Gradient photo area
             ZStack(alignment: .topLeading) {
-                LinearGradient(
-                    colors: [Color.irohaFujiLt, Color(hex: "#8F87DD")],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .frame(height: 90)
-                .overlay(
-                    RadialGradient(
-                        colors: [.white.opacity(0.25), .clear],
-                        center: UnitPoint(x: 0.7, y: 0.3),
-                        startRadius: 0,
-                        endRadius: 120
+                if let photoData = memory.visit.allPhotoThumbnails.first,
+                   let uiImage = UIImage(data: photoData) {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(height: 120)
+                        .clipped()
+                        .overlay(
+                            LinearGradient(
+                                colors: [.black.opacity(0.35), .clear, .black.opacity(0.15)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                } else {
+                    LinearGradient(
+                        colors: [Color.irohaFujiLt, Color(hex: "#8F87DD")],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
                     )
-                )
+                    .frame(height: 120)
+                    .overlay(
+                        RadialGradient(
+                            colors: [.white.opacity(0.25), .clear],
+                            center: UnitPoint(x: 0.7, y: 0.3),
+                            startRadius: 0,
+                            endRadius: 120
+                        )
+                    )
+                }
 
-                // "X YEARS AGO" label
-                Text("\(memory.yearsAgo) YEARS AGO")
+                Text("\(memory.yearsAgo)年前")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundColor(.white)
                     .tracking(0.8)
@@ -69,7 +108,6 @@ struct MemoryCardView: View {
                     .padding(.top, 10)
                     .padding(.leading, 12)
 
-                // Dismiss button
                 HStack {
                     Spacer()
                     Button {
@@ -90,13 +128,12 @@ struct MemoryCardView: View {
                 }
             }
 
-            // Body
             VStack(alignment: .leading, spacing: 3) {
                 let dateString = memory.visit.startDate.formatted(
                     .dateTime.year().month(.twoDigits).day(.twoDigits)
                         .locale(Locale(identifier: "ja_JP"))
                 )
-                Text("\u{1F4C5} \(dateString) \u{00B7} \(memory.yearsAgo)年前の今日")
+                Text("\(dateString) \u{00B7} \(memory.yearsAgo)年前の今日")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundColor(.irohaFuji)
 
@@ -123,13 +160,13 @@ struct MemoryCardView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 13))
         .shadow(color: Color.irohaFuji5.opacity(0.18), radius: 7, x: 0, y: 4)
+        .contentShape(RoundedRectangle(cornerRadius: 13))
+        .onTapGesture { onTap?(memory.visit) }
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 6)
     }
 }
-
-// MARK: - MemoryItem
 
 private struct MemoryItem {
     let visit: Visit

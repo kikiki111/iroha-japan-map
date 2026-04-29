@@ -130,7 +130,7 @@ struct OnboardingView: View {
     private var pageTitle: String {
         switch currentPage {
         case 0:  return "いろは歌は47文字"
-        case 1:  return "タップで記録\n長押しで行きたい"
+        case 1:  return "タップで記録"
         default: return "旅の記録が\n自動でまとまる"
         }
     }
@@ -139,7 +139,7 @@ struct OnboardingView: View {
         switch currentPage {
         case 0:  return "日本は47都道府県。\nすべての旅を、地図に刻もう。"
         case 1:  return "日時とひとことメモを残すだけ。\n写真も添えられます。"
-        default: return "3日以内の連続訪問は\nひとつの旅として表示されます。"
+        default: return "3日以内の連続旅行は\nひとつの旅として表示されます。"
         }
     }
 
@@ -149,30 +149,33 @@ struct OnboardingView: View {
     private var illustrationView: some View {
         switch currentPage {
         case 0:
+            let irohaCols: [[String]] = [
+                ["ゑ","ひ","も","せ","す"],
+                ["あ","さ","き","ゆ","め","み","し"],
+                ["け","ふ","こ","え","て"],
+                ["う","ゐ","の","お","く","や","ま"],
+                ["つ","ね","な","ら","む"],
+                ["わ","か","よ","た","れ","そ"],
+                ["ち","り","ぬ","る","を"],
+                ["い","ろ","は","に","ほ","へ","と"],
+            ]
+            let irohaChars: Set<String> = ["い","ろ","は"]
             ZStack {
                 RoundedRectangle(cornerRadius: 16)
                     .fill(.white.opacity(0.08))
-                VStack(spacing: 10) {
-                    HStack(spacing: 14) {
-                        Ellipse()
-                            .fill(.white.opacity(0.22))
-                            .frame(width: 60, height: 28)
-                        Spacer()
-                    }
-                    HStack(spacing: 8) {
-                        Spacer()
-                        RoundedRectangle(cornerRadius: 5)
-                            .fill(.white.opacity(0.2))
-                            .frame(width: 50, height: 52)
-                            .rotationEffect(.degrees(-8))
-                        RoundedRectangle(cornerRadius: 5)
-                            .fill(.white.opacity(0.24))
-                            .frame(width: 36, height: 34)
-                            .rotationEffect(.degrees(-5))
-                        Spacer()
+                HStack(alignment: .top, spacing: 3) {
+                    ForEach(0..<irohaCols.count, id: \.self) { col in
+                        VStack(spacing: 3) {
+                            ForEach(0..<irohaCols[col].count, id: \.self) { row in
+                                let ch = irohaCols[col][row]
+                                Text(ch)
+                                    .font(.system(size: 15, weight: .medium, design: .serif))
+                                    .foregroundColor(.white.opacity(irohaChars.contains(ch) ? 0.85 : 0.2))
+                                    .frame(width: 18, height: 22)
+                            }
+                        }
                     }
                 }
-                .padding(20)
             }
 
         case 1:
