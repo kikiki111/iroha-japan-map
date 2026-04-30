@@ -20,7 +20,6 @@ struct JourneyTrackerView: View {
     @State private var chartPeriod: ChartPeriod = .year
     @State private var chartMetric: ChartMetric = .visitCount
     @State private var chartScrollPosition: Date = Calendar.current.dateInterval(of: .year, for: Date())?.start ?? Date()
-    @State private var selectedChartDate: Date?
 
     // MARK: - Cumulative (all-time)
 
@@ -109,11 +108,8 @@ struct JourneyTrackerView: View {
     private var chartVisibleDateRange: (start: Date, end: Date) {
         let domain = chartDateRange
         let latestStart = latestScrollStart(period: chartPeriod, selectedYear: selectedYear)
-        let proposedStart = (chartScrollPosition < domain.start || chartScrollPosition > domain.end)
-            ? latestStart
-            : chartScrollPosition
-        let boundedStart = min(proposedStart, latestStart)
-        let start = max(boundedStart, domain.start)
+        let upperBound = max(latestStart, domain.start)
+        let start = min(max(chartScrollPosition, domain.start), upperBound)
         let end = min(addVisibleLength(to: start, period: chartPeriod), domain.end)
         return (start, end)
     }
@@ -160,72 +156,6 @@ struct JourneyTrackerView: View {
 
     private func resetChartScrollPosition(period: ChartPeriod, selectedYear year: Int) {
         chartScrollPosition = latestScrollStart(period: period, selectedYear: year)
-    }
-
-    private func snapDateToPeriod(_ date: Date) -> Date {
-        let calendar = Calendar.current
-        switch chartPeriod {
-        case .week, .month:
-            return calendar.startOfDay(for: date)
-        case .year, .all:
-            let comps = calendar.dateComponents([.year, .month], from: date)
-            return calendar.date(from: comps) ?? date
-        }
-    }
-
-    private func visitsInSelectedPeriod() -> [Visit] {
-        guard let selected = selectedChartDate else { return [] }
-        let calendar = Calendar.current
-        switch chartPeriod {
-        case .week, .month:
-            return filteredVisits.filter { calendar.isDate($0.startDate, inSameDayAs: selected) }
-        case .year, .all:
-            return filteredVisits.filter {
-                let c1 = calendar.dateComponents([.year, .month], from: $0.startDate)
-                let c2 = calendar.dateComponents([.year, .month], from: selected)
-                return c1.year == c2.year && c1.month == c2.month
-            }
-        }
-    }
-
-    private func tripsForSelectedDate() -> [Trip] {
-        guard let selected = selectedChartDate else { return [] }
-        let calendar = Calendar.current
-        return filteredTrips.filter { trip in
-            trip.visits.contains { visit in
-                switch chartPeriod {
-                case .week, .month:
-                    return calendar.isDate(visit.startDate, inSameDayAs: selected)
-                case .year, .all:
-                    let c1 = calendar.dateComponents([.year, .month], from: visit.startDate)
-                    let c2 = calendar.dateComponents([.year, .month], from: selected)
-                    return c1.year == c2.year && c1.month == c2.month
-                }
-            }
-        }
-    }
-
-    private var selectedPeriodLabel: String {
-        guard let selected = selectedChartDate else { return "" }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ja_JP")
-        switch chartPeriod {
-        case .week, .month:
-            formatter.dateFormat = "M月d日（E）"
-        case .year, .all:
-            formatter.dateFormat = "yyyy年M月"
-        }
-        return formatter.string(from: selected)
-    }
-
-    private func tripDateLabel(_ trip: Trip) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "ja_JP")
-        formatter.dateFormat = "M/d"
-        if trip.isSingleVisit {
-            return formatter.string(from: trip.startDate)
-        }
-        return "\(formatter.string(from: trip.startDate))〜\(formatter.string(from: trip.endDate))"
     }
 
     private var chartData: [JourneyDataPoint] {
@@ -1030,23 +960,20 @@ struct JourneyTrackerView: View {
                 .padding(.horizontal, 20)
 
             VStack(alignment: .leading, spacing: 2) {
-                let isSelected = selectedChartDate != nil && chartMetric == .visitCount
-                Text(isSelected ? selectedPeriodLabel : (chartMetric == .visitCount ? "合計" : "累計"))
+                Text(chartMetric == .visitCount ? "合計" : "累計")
                     .font(.system(size: 11))
                     .foregroundColor(.irohaSumi3)
                 HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text(verbatim: "\(isSelected ? visitsInSelectedPeriod().count : chartSummaryValue)")
+                    Text(verbatim: "\(chartSummaryValue)")
                         .font(.system(size: 28, weight: .bold))
                         .foregroundColor(.irohaSumi)
                     Text(chartMetric == .visitCount ? "回" : "県")
                         .font(.system(size: 13))
                         .foregroundColor(.irohaSumi3)
                 }
-                if !isSelected {
-                    Text(chartDateRangeLabel)
-                        .font(.system(size: 11))
-                        .foregroundColor(.irohaSumi3)
-                }
+                Text(chartDateRangeLabel)
+                    .font(.system(size: 11))
+                    .foregroundColor(.irohaSumi3)
             }
             .padding(.horizontal, 20)
             .padding(.top, 8)
@@ -1063,8 +990,6 @@ struct JourneyTrackerView: View {
             .padding(.leading, 14)
             .padding(.trailing, 24)
             .padding(.vertical, 6)
-
-            selectedPeriodTrips
         }
         .background(Color.irohaCard)
         .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -1074,9 +999,6 @@ struct JourneyTrackerView: View {
         )
         .padding(.horizontal, 20)
         .padding(.top, 14)
-        .onChange(of: chartPeriod) { _, _ in selectedChartDate = nil }
-        .onChange(of: chartMetric) { _, _ in selectedChartDate = nil }
-        .onChange(of: selectedYear) { _, _ in selectedChartDate = nil }
     }
 
     private var chartXMarkValues: AxisMarkValues {
@@ -1102,10 +1024,7 @@ struct JourneyTrackerView: View {
                     x: .value("日付", point.date, unit: barUnit),
                     y: .value("回数", point.count)
                 )
-                .foregroundStyle(
-                    selectedChartDate != nil && snapDateToPeriod(point.date) == selectedChartDate
-                        ? Color.irohaFujiDk : Color.irohaFuji
-                )
+                .foregroundStyle(Color.irohaFuji)
                 .cornerRadius(2)
             }
 
@@ -1138,25 +1057,6 @@ struct JourneyTrackerView: View {
             .chartScrollableAxes(.horizontal)
             .chartXVisibleDomain(length: chartVisibleDomainLength)
             .chartScrollPosition(x: $chartScrollPosition)
-            .chartOverlay { proxy in
-                GeometryReader { geometry in
-                    Rectangle().fill(.clear).contentShape(Rectangle())
-                        .onTapGesture { location in
-                            guard let plotFrame = proxy.plotFrame else { return }
-                            let origin = geometry[plotFrame].origin
-                            let x = location.x - origin.x
-                            guard let date: Date = proxy.value(atX: x) else { return }
-                            let snapped = snapDateToPeriod(date)
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                if selectedChartDate == snapped {
-                                    selectedChartDate = nil
-                                } else {
-                                    selectedChartDate = snapped
-                                }
-                            }
-                        }
-                }
-            }
     }
 
     @ViewBuilder
@@ -1210,61 +1110,6 @@ struct JourneyTrackerView: View {
             .chartScrollableAxes(.horizontal)
             .chartXVisibleDomain(length: chartVisibleDomainLength)
             .chartScrollPosition(x: $chartScrollPosition)
-    }
-
-    @ViewBuilder
-    private var selectedPeriodTrips: some View {
-        if let _ = selectedChartDate, chartMetric == .visitCount {
-            let trips = tripsForSelectedDate()
-            if !trips.isEmpty {
-                VStack(spacing: 0) {
-                    Divider()
-                        .padding(.horizontal, 14)
-                    ForEach(trips) { trip in
-                        Button {
-                            selectedChartDate = nil
-                            highlightTrip = trip
-                        } label: {
-                            HStack(spacing: 8) {
-                                Circle()
-                                    .fill(Color.irohaFuji)
-                                    .frame(width: 6, height: 6)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(trip.prefectureNames.joined(separator: " → "))
-                                        .font(.system(size: 13, weight: .medium))
-                                        .foregroundColor(.irohaSumi)
-                                        .lineLimit(1)
-                                    HStack(spacing: 4) {
-                                        Text(tripDateLabel(trip))
-                                            .font(.system(size: 11))
-                                            .foregroundColor(.irohaSumi3)
-                                        if !trip.tripName.isEmpty {
-                                            Text("·")
-                                                .font(.system(size: 11))
-                                                .foregroundColor(.irohaSumi3)
-                                            Text(trip.tripName)
-                                                .font(.system(size: 11))
-                                                .foregroundColor(.irohaSumi3)
-                                                .lineLimit(1)
-                                        }
-                                    }
-                                }
-                                Spacer()
-                                Text(verbatim: "\(trip.visits.count)件")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.irohaSumi3)
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundColor(.irohaSumi3.opacity(0.5))
-                            }
-                            .padding(.vertical, 8)
-                            .padding(.horizontal, 14)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-        }
     }
 
     private func chartXLabel(for date: Date) -> String {

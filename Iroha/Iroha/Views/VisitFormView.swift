@@ -334,21 +334,24 @@ struct VisitFormView: View {
             if !locationCompleter.results.isEmpty {
                 VStack(spacing: 0) {
                     ForEach(Array(locationCompleter.results.prefix(5).enumerated()), id: \.offset) { _, result in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(result.title)
-                                .font(.system(size: 14))
-                                .foregroundColor(.irohaSumi)
-                            if !result.subtitle.isEmpty {
-                                Text(result.subtitle)
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.irohaSumi3)
+                        Button {
+                            selectLocation(result)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(result.title)
+                                    .font(.system(size: 14))
+                                    .foregroundColor(.irohaSumi)
+                                if !result.subtitle.isEmpty {
+                                    Text(result.subtitle)
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.irohaSumi3)
+                                }
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .contentShape(Rectangle())
-                        .onTapGesture { selectLocation(result) }
+                        .buttonStyle(.plain)
                         Divider().padding(.leading, 12)
                     }
                 }
@@ -361,7 +364,7 @@ struct VisitFormView: View {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 11))
                         .foregroundColor(.irohaFuji)
-                    Text("座標あり")
+                    Text("位置情報あり")
                         .font(.system(size: 11))
                         .foregroundColor(.irohaSumi3)
                     Spacer()
@@ -369,7 +372,7 @@ struct VisitFormView: View {
                         locationLatitude = nil
                         locationLongitude = nil
                     } label: {
-                        Text("座標を削除")
+                        Text("位置情報を削除")
                             .font(.system(size: 11))
                             .foregroundColor(.irohaSumi3)
                     }
@@ -380,10 +383,16 @@ struct VisitFormView: View {
         .padding(.bottom, 14)
     }
 
+    @MainActor
     private func selectLocation(_ completion: MKLocalSearchCompletion) {
-        Task {
-            isSelectingFromSuggestion = true
-            locationFieldFocused = false
+        isSelectingFromSuggestion = true
+        locationFieldFocused = false
+        location = completion.title
+        locationLatitude = nil
+        locationLongitude = nil
+        locationCompleter.results = []
+
+        Task { @MainActor in
             let request = MKLocalSearch.Request(completion: completion)
             let search = MKLocalSearch(request: request)
             if let response = try? await search.start(),
@@ -391,10 +400,7 @@ struct VisitFormView: View {
                 location = item.name ?? completion.title
                 locationLatitude = item.placemark.coordinate.latitude
                 locationLongitude = item.placemark.coordinate.longitude
-            } else {
-                location = completion.title
             }
-            locationCompleter.results = []
             isSelectingFromSuggestion = false
         }
     }
