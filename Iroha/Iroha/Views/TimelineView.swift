@@ -177,23 +177,21 @@ struct TimelineView: View {
                         .foregroundColor(.irohaSumi3)
                 }
 
-                if !isAllYearsMode {
-                    Button {
-                        shareYearRecap()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "square.and.arrow.up")
-                                .font(.system(size: 12))
-                            Text("シェア")
-                                .font(.system(size: 12, weight: .bold))
-                        }
-                        .foregroundColor(.irohaFujiDk)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 5)
-                        .background(Color.irohaFujiLt.opacity(0.25))
-                        .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.irohaFujiLt, lineWidth: 0.5))
-                        .clipShape(RoundedRectangle(cornerRadius: 20))
+                Button {
+                    shareYearRecap()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 12))
+                        Text("シェア")
+                            .font(.system(size: 12, weight: .bold))
                     }
+                    .foregroundColor(.irohaFujiDk)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(Color.irohaFujiLt.opacity(0.25))
+                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.irohaFujiLt, lineWidth: 0.5))
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
                 }
             }
         }
@@ -298,7 +296,9 @@ struct TimelineView: View {
                 .font(.system(size: 13, weight: .bold))
                 .foregroundColor(.irohaSumi3)
                 .tracking(1)
-                .padding(.leading, 42)
+                .padding(.horizontal, 6)
+                .background(Color.irohaWashi)
+                .padding(.leading, 36)
         }
     }
 
@@ -380,7 +380,7 @@ struct TimelineView: View {
                 }
             }
 
-            // Row 2: Transport icons + date
+            // Row 2: Transport icons + date (start, and return date if different)
             HStack(spacing: 5) {
                 ForEach(uniqueTransports.prefix(3), id: \.rawValue) { t in
                     Image(systemName: t.iconName)
@@ -388,47 +388,74 @@ struct TimelineView: View {
                         .foregroundColor(.irohaSumi3)
                 }
 
-                if trip.isSingleVisit {
+                let isSameDay = calendar.isDate(trip.startDate, inSameDayAs: trip.endDate)
+                if isSameDay {
                     Text(trip.startDate.formatted(.dateTime.year().month().day().locale(Locale(identifier: "ja_JP"))))
                         .font(.system(size: 12))
                         .foregroundColor(.irohaSumi3)
                 } else {
                     HStack(spacing: 3) {
-                        Text(trip.startDate.formatted(.dateTime.month().day().locale(Locale(identifier: "ja_JP"))))
-                        Text("–")
-                        Text(trip.endDate.formatted(.dateTime.month().day().locale(Locale(identifier: "ja_JP"))))
+                        Text(trip.startDate.formatted(.dateTime.year().month().day().locale(Locale(identifier: "ja_JP"))))
+                        Text("〜")
+                        Text(trip.endDate.formatted(.dateTime.year().month().day().locale(Locale(identifier: "ja_JP"))))
                     }
                     .font(.system(size: 12))
                     .foregroundColor(.irohaSumi3)
                 }
             }
 
-            // Row 3: Trip name or note
-            if !trip.tripName.isEmpty {
-                Text(trip.tripName)
-                    .font(.system(size: 12))
-                    .foregroundColor(.irohaSumi2)
-                    .lineLimit(1)
-            } else if let firstNote = trip.visits.first(where: { !$0.note.isEmpty })?.note {
-                Text(firstNote)
-                    .font(.system(size: 12))
-                    .foregroundColor(.irohaSumi2)
-                    .lineLimit(1)
-            }
-
-            // Row 4: Photo thumbnails
-            if !allThumbnails.isEmpty {
-                HStack(spacing: 4) {
-                    ForEach(allThumbnails.prefix(4), id: \.1) { data, _ in
-                        if let uiImage = UIImage(data: data) {
-                            Image(uiImage: uiImage)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: 44, height: 44)
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
+            // Row 3: Location + trip name + memo (horizontal scroll on overflow)
+            let primaryLocation = trip.visits.first(where: { $0.hasLocation })?.location
+            let memo = trip.visits.first(where: { !$0.note.isEmpty })?.note
+            if primaryLocation != nil || !trip.tripName.isEmpty || memo != nil {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        if let loc = primaryLocation {
+                            HStack(spacing: 2) {
+                                Text("📍")
+                                    .font(.system(size: 11))
+                                Text(loc)
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.irohaSumi2)
+                                    .lineLimit(1)
+                            }
+                            .fixedSize(horizontal: true, vertical: false)
+                        }
+                        if !trip.tripName.isEmpty {
+                            Text(trip.tripName)
+                                .font(.system(size: 12))
+                                .foregroundColor(.irohaSumi3)
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
+                        }
+                        if let memo = memo {
+                            Text(memo)
+                                .font(.system(size: 12))
+                                .foregroundColor(.irohaSumi2)
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
                         }
                     }
                 }
+                .scrollClipDisabled()
+            }
+
+            // Row 4: Photo thumbnails (horizontal scroll, all photos)
+            if !allThumbnails.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: 4) {
+                        ForEach(allThumbnails, id: \.1) { data, _ in
+                            if let uiImage = UIImage(data: data) {
+                                Image(uiImage: uiImage)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 44, height: 44)
+                                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                            }
+                        }
+                    }
+                }
+                .scrollClipDisabled()
             }
         }
     }
@@ -502,6 +529,7 @@ struct TripDetailSheet: View {
     var onEditVisit: ((Visit) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
+    @State private var fullscreenSelection: PhotoFullscreenSelection?
 
     private var nights: Int {
         let calendar = Calendar.current
@@ -546,6 +574,13 @@ struct TripDetailSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationBackground(.ultraThinMaterial)
+        .fullScreenCover(item: $fullscreenSelection) { selection in
+            PhotoFullscreenViewer(
+                filenames: selection.filenames,
+                thumbnails: selection.thumbnails,
+                initialIndex: selection.initialIndex
+            )
+        }
     }
 
     // MARK: - Header
@@ -665,27 +700,53 @@ struct TripDetailSheet: View {
                     VisitCompanionBadge(companions: visit.companions)
                 }
 
-                if visit.hasLocation {
-                    HStack(spacing: 3) {
-                        Image(systemName: "mappin")
-                            .font(.system(size: 10))
-                            .foregroundColor(.irohaSumi3)
-                        Text(visit.location)
-                            .font(.system(size: 12))
-                            .foregroundColor(.irohaSumi2)
-                            .lineLimit(1)
+                if visit.hasLocation || !trip.tripName.isEmpty {
+                    HStack(spacing: 8) {
+                        if visit.hasLocation {
+                            HStack(spacing: 2) {
+                                Text("📍")
+                                    .font(.system(size: 11))
+                                Text(visit.location)
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.irohaSumi2)
+                                    .lineLimit(1)
+                            }
+                        }
+                        if !trip.tripName.isEmpty {
+                            Text(trip.tripName)
+                                .font(.system(size: 12))
+                                .foregroundColor(.irohaSumi3)
+                                .lineLimit(1)
+                        }
                     }
                 }
 
-                // Photo thumbnail
-                if let thumbnailData = visit.allPhotoThumbnails.first,
-                   let uiImage = UIImage(data: thumbnailData) {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(height: 120)
-                        .clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                // Photo thumbnails (Photos-app style 3-column grid)
+                if !visit.allPhotoThumbnails.isEmpty {
+                    let columns = Array(repeating: GridItem(.flexible(), spacing: 2), count: 3)
+                    LazyVGrid(columns: columns, spacing: 2) {
+                        ForEach(Array(visit.allPhotoThumbnails.enumerated()), id: \.offset) { index, data in
+                            if let uiImage = UIImage(data: data) {
+                                Color.clear
+                                    .aspectRatio(1, contentMode: .fit)
+                                    .overlay(
+                                        Image(uiImage: uiImage)
+                                            .resizable()
+                                            .scaledToFill()
+                                    )
+                                    .clipped()
+                                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        fullscreenSelection = PhotoFullscreenSelection(
+                                            filenames: visit.allPhotoFilenames,
+                                            thumbnails: visit.allPhotoThumbnails,
+                                            initialIndex: index
+                                        )
+                                    }
+                            }
+                        }
+                    }
                 }
 
                 // Memo
@@ -700,17 +761,99 @@ struct TripDetailSheet: View {
                 Button {
                     onEditVisit?(visit)
                 } label: {
-                    Text("編集")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.irohaFujiDk)
+                    HStack(spacing: 4) {
+                        Image(systemName: "square.and.pencil")
+                            .font(.system(size: 12))
+                        Text("編集")
+                            .font(.system(size: 12, weight: .bold))
+                    }
+                    .foregroundColor(.irohaFujiDk)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(Color.irohaFujiLt.opacity(0.25))
+                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.irohaFujiLt, lineWidth: 0.5))
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
                 }
-                .padding(.top, 2)
+                .padding(.top, 4)
             }
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Spacer(minLength: 0)
         }
+    }
+}
+
+// MARK: - PhotoFullscreenViewer
+
+struct PhotoFullscreenSelection: Identifiable {
+    let id = UUID()
+    let filenames: [String]
+    let thumbnails: [Data]
+    let initialIndex: Int
+}
+
+struct PhotoFullscreenViewer: View {
+    let filenames: [String]
+    let thumbnails: [Data]
+    let initialIndex: Int
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var currentIndex: Int
+
+    init(filenames: [String], thumbnails: [Data], initialIndex: Int) {
+        self.filenames = filenames
+        self.thumbnails = thumbnails
+        self.initialIndex = initialIndex
+        self._currentIndex = State(initialValue: initialIndex)
+    }
+
+    private var pageCount: Int { max(filenames.count, thumbnails.count) }
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.ignoresSafeArea()
+
+            TabView(selection: $currentIndex) {
+                ForEach(0..<pageCount, id: \.self) { i in
+                    photoView(at: i)
+                        .tag(i)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: pageCount > 1 ? .always : .never))
+            .ignoresSafeArea()
+
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 30))
+                    .foregroundStyle(Color.white, Color.black.opacity(0.45))
+                    .padding(.trailing, 16)
+                    .padding(.top, 12)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func photoView(at index: Int) -> some View {
+        if let image = loadImage(at: index) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+        } else {
+            Color.black
+        }
+    }
+
+    private func loadImage(at index: Int) -> UIImage? {
+        if index < filenames.count, let img = PhotoStorageManager.loadImage(filename: filenames[index]) {
+            return img
+        }
+        if index < thumbnails.count, let img = UIImage(data: thumbnails[index]) {
+            return img
+        }
+        return nil
     }
 }
 

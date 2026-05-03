@@ -6,7 +6,6 @@
 import SwiftUI
 import SwiftData
 import PhotosUI
-import MapKit
 
 struct VisitFormView: View {
     let prefectures: [Prefecture]
@@ -44,6 +43,8 @@ struct VisitFormView: View {
     @Query(sort: \Visit.startDate) private var allVisits: [Visit]
     @State private var expandedSection: FormSection?
     @State private var prefectureSearch = ""
+    @State private var activeDateField: DateField = .start
+    @State private var pickerRefreshId = 0
 
     private var isEditing: Bool { editingVisit != nil }
     private var isPrefectureLocked: Bool { prefecture != nil }
@@ -51,6 +52,10 @@ struct VisitFormView: View {
 
     private enum FormSection: Hashable {
         case prefecture, date, tag, location, transport, companion, mood, photo
+    }
+
+    private enum DateField {
+        case start, end
     }
 
     var body: some View {
@@ -145,6 +150,19 @@ struct VisitFormView: View {
             if expandedSection == .date {
                 datePickerContent
                     .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .onChange(of: expandedSection) { _, newSection in
+            if newSection == .date { activeDateField = .start }
+        }
+        .onChange(of: activeDateField) { _, newField in
+            guard newField == .end else { return }
+            // 帰着日カレンダーが開始日の年月で開くように、年月が違っていたら開始日に揃える
+            let calendar = Calendar.current
+            let visitYM = calendar.dateComponents([.year, .month], from: visitDate)
+            let endYM = calendar.dateComponents([.year, .month], from: endDate)
+            if visitYM.year != endYM.year || visitYM.month != endYM.month {
+                endDate = visitDate
             }
         }
     }
@@ -324,6 +342,12 @@ struct VisitFormView: View {
                 .padding(.vertical, 8)
                 .background(Color.irohaCard)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+                .submitLabel(.done)
+                .onSubmit {
+                    locationFieldFocused = false
+                    locationCompleter.results = []
+                    expandedSection = nil
+                }
                 .onChange(of: location) { _, newValue in
                     if isSelectingFromSuggestion { return }
                     locationLatitude = nil
@@ -350,8 +374,14 @@ struct VisitFormView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .simultaneousGesture(
+                            TapGesture().onEnded {
+                                selectLocation(result)
+                            }
+                        )
                         Divider().padding(.leading, 12)
                     }
                 }
@@ -384,23 +414,16 @@ struct VisitFormView: View {
     }
 
     @MainActor
-    private func selectLocation(_ completion: MKLocalSearchCompletion) {
+    private func selectLocation(_ suggestion: PlaceSuggestion) {
+        if isSelectingFromSuggestion { return }
         isSelectingFromSuggestion = true
         locationFieldFocused = false
-        location = completion.title
-        locationLatitude = nil
-        locationLongitude = nil
+        location = suggestion.title
+        locationLatitude = suggestion.latitude
+        locationLongitude = suggestion.longitude
         locationCompleter.results = []
-
+        expandedSection = nil
         Task { @MainActor in
-            let request = MKLocalSearch.Request(completion: completion)
-            let search = MKLocalSearch(request: request)
-            if let response = try? await search.start(),
-               let item = response.mapItems.first {
-                location = item.name ?? completion.title
-                locationLatitude = item.placemark.coordinate.latitude
-                locationLongitude = item.placemark.coordinate.longitude
-            }
             isSelectingFromSuggestion = false
         }
     }
@@ -643,33 +666,100 @@ struct VisitFormView: View {
     }
 
     private var datePickerContent: some View {
-        VStack(spacing: 12) {
-            DatePicker(
-                "開始日",
-                selection: $visitDate,
-                displayedComponents: .date
-            )
-            .datePickerStyle(.compact)
-            .tint(.irohaFuji)
-            .environment(\.locale, Locale(identifier: "ja_JP"))
-            .onChange(of: visitDate) { _, newDate in
-                if endDate < newDate { endDate = newDate }
+        VStack(spacing: 8) {
+            dateFieldRow(field: .start, label: "開始日", date: visitDate)
+            if activeDateField == .start {
+                DatePicker(
+                    "開始日",
+                    selection: $visitDate,
+                    displayedComponents: .date
+                )
+                .datePickerStyle(.graphical)
+                .tint(.irohaFuji)
+                .environment(\.locale, Locale(identifier: "ja_JP"))
+                .labelsHidden()
+                .id(pickerRefreshId)
+                .onChange(of: visitDate) { oldDate, newDate in
+                    let calendar = Calendar.current
+                    if newDate > endDate {
+                        let duration = calendar.dateComponents([.day], from: oldDate, to: endDate).day ?? 0
+                        endDate = calendar.date(byAdding: .day, value: max(duration, 0), to: newDate) ?? newDate
+                    }
+                    // 年月ホイール操作（年・月のみ変更）では切替しない。日付グリッドで日をタップした時のみ次へ進む
+                    let oldComp = calendar.dateComponents([.year, .month, .day], from: oldDate)
+                    let newComp = calendar.dateComponents([.year, .month, .day], from: newDate)
+                    let isDayLevelChange = oldComp.year == newComp.year
+                        && oldComp.month == newComp.month
+                        && oldComp.day != newComp.day
+                    if isDayLevelChange {
+                        activeDateField = .end
+                    }
+                }
+
+                pickerDoneLink
             }
 
-            DatePicker(
-                "帰着日",
-                selection: $endDate,
-                displayedComponents: .date
-            )
-            .datePickerStyle(.compact)
-            .tint(.irohaFuji)
-            .environment(\.locale, Locale(identifier: "ja_JP"))
-            .onChange(of: endDate) { _, newDate in
-                if newDate < visitDate { endDate = visitDate }
+            dateFieldRow(field: .end, label: "帰着日", date: endDate)
+            if activeDateField == .end {
+                DatePicker(
+                    "帰着日",
+                    selection: $endDate,
+                    in: visitDate...,
+                    displayedComponents: .date
+                )
+                .datePickerStyle(.graphical)
+                .tint(.irohaFuji)
+                .environment(\.locale, Locale(identifier: "ja_JP"))
+                .labelsHidden()
+                .id(pickerRefreshId)
+                .onChange(of: endDate) { oldDate, newDate in
+                    // 年月ホイール操作では閉じない。日付グリッドで日をタップした時のみ旅行日セクションを閉じる
+                    let calendar = Calendar.current
+                    let oldComp = calendar.dateComponents([.year, .month, .day], from: oldDate)
+                    let newComp = calendar.dateComponents([.year, .month, .day], from: newDate)
+                    let isDayLevelChange = oldComp.year == newComp.year
+                        && oldComp.month == newComp.month
+                        && oldComp.day != newComp.day
+                    if isDayLevelChange {
+                        expandedSection = nil
+                    }
+                }
+
+                pickerDoneLink
             }
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 14)
+    }
+
+    private var pickerDoneLink: some View {
+        HStack {
+            Spacer()
+            Button {
+                pickerRefreshId += 1
+            } label: {
+                Text("完了")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.irohaFuji)
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 8)
+            }
+        }
+    }
+
+    private func dateFieldRow(field: DateField, label: String, date: Date) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 15))
+                .foregroundColor(.irohaSumi2)
+            Spacer()
+            Text(date.formatted(.dateTime.year().month().day().locale(Locale(identifier: "ja_JP"))))
+                .font(.system(size: 15))
+                .foregroundColor(activeDateField == field ? .irohaFuji : .irohaSumi)
+        }
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
+        .onTapGesture { activeDateField = field }
     }
 
     private var tagPickerContent: some View {

@@ -24,30 +24,31 @@ enum DistanceCalculator {
                  lat2: target.latitude, lon2: target.longitude)
     }
 
-    /// 旅行全体の移動距離を計算（居住地→各県→居住地のルート距離合計）
+    /// 旅行全体の移動距離を計算（居住地→各訪問地→居住地のルート距離合計）
+    /// 各 visit に位置情報があればその座標、なければ県の代表座標を使用。
     static func totalRouteDistance(trips: [Trip], home: Prefecture, prefectures: [Prefecture]) -> Double {
         var total = 0.0
+        let homeCoord = (lat: home.latitude, lon: home.longitude)
 
         for trip in trips {
             let sorted = trip.visits.sorted { $0.startDate < $1.startDate }
-            var stops: [Prefecture] = []
-            var seen = Set<String>()
-            for visit in sorted {
-                if seen.insert(visit.prefectureName).inserted,
-                   let pref = prefectures.first(where: { $0.name == visit.prefectureName }) {
-                    stops.append(pref)
+            let stops: [(lat: Double, lon: Double)] = sorted.compactMap { visit in
+                if let lat = visit.locationLatitude, let lon = visit.locationLongitude {
+                    return (lat, lon)
                 }
+                if let pref = prefectures.first(where: { $0.name == visit.prefectureName }) {
+                    return (pref.latitude, pref.longitude)
+                }
+                return nil
             }
-            guard !stops.isEmpty else { continue }
+            guard let first = stops.first, let last = stops.last else { continue }
 
-            // 居住地 → 最初の県
-            total += distance(from: home, to: stops[0])
-            // 県 → 県
+            total += distance(lat1: homeCoord.lat, lon1: homeCoord.lon, lat2: first.lat, lon2: first.lon)
             for i in 1..<stops.count {
-                total += distance(from: stops[i - 1], to: stops[i])
+                total += distance(lat1: stops[i - 1].lat, lon1: stops[i - 1].lon,
+                                  lat2: stops[i].lat,     lon2: stops[i].lon)
             }
-            // 最後の県 → 居住地
-            total += distance(from: stops[stops.count - 1], to: home)
+            total += distance(lat1: last.lat, lon1: last.lon, lat2: homeCoord.lat, lon2: homeCoord.lon)
         }
 
         return total

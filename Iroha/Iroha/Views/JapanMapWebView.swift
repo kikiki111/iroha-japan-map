@@ -140,6 +140,27 @@ final class JapanMapWKWebView: WKWebView {
         (function() {
             var usesTouch = false;
             var defaultStroke = 'white';
+            var touchStartX = 0;
+            var touchStartY = 0;
+            var touchMoved = false;
+            var multiTouch = false;
+            var TAP_MOVE_THRESHOLD = 3;
+            document.addEventListener('touchstart', function(e) {
+                usesTouch = true;
+                if (e.touches.length > 1) { multiTouch = true; return; }
+                multiTouch = false;
+                touchMoved = false;
+                touchStartX = e.touches[0].clientX;
+                touchStartY = e.touches[0].clientY;
+            }, { passive: true });
+            document.addEventListener('touchmove', function(e) {
+                if (e.touches.length > 1) { multiTouch = true; return; }
+                var dx = e.touches[0].clientX - touchStartX;
+                var dy = e.touches[0].clientY - touchStartY;
+                if (Math.sqrt(dx * dx + dy * dy) > TAP_MOVE_THRESHOLD) {
+                    touchMoved = true;
+                }
+            }, { passive: true });
             function setup() {
                 var els = document.querySelectorAll('.prefecture');
                 if (els.length === 0) { setTimeout(setup, 100); return; }
@@ -147,8 +168,8 @@ final class JapanMapWKWebView: WKWebView {
                     el.removeAttribute('stroke');
                     el.removeAttribute('stroke-width');
                     el.removeAttribute('fill');
-                    el.addEventListener('touchstart', function(e) { e.preventDefault(); usesTouch = true; }, { passive: false });
                     el.addEventListener('touchend', function(e) {
+                        if (multiTouch || touchMoved) return;
                         e.preventDefault();
                         handleTap(el);
                     });

@@ -173,13 +173,11 @@ private struct ShareCardView: View {
         VStack(spacing: 0) {
             Spacer().frame(height: 28)
 
-            if let year {
-                Text("\(year)年の旅")
-                    .font(.system(size: 18, weight: .light, design: .serif))
-                    .foregroundColor(textColor)
-                    .tracking(2)
-                    .padding(.bottom, 10)
-            }
+            Text(verbatim: year.map { "\($0)年の旅" } ?? "すべての旅")
+                .font(.system(size: 18, weight: .light, design: .serif))
+                .foregroundColor(textColor)
+                .tracking(2)
+                .padding(.bottom, 10)
 
             Image(uiImage: mapImage)
                 .resizable()
