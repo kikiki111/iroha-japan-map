@@ -25,17 +25,6 @@ struct JapanMapView: View {
     @GestureState private var pinchScale: CGFloat = 1.0
     @GestureState private var dragOffset: CGSize = .zero
 
-    private let minScale: CGFloat = 1.0
-    private let maxScale: CGFloat = 4.0
-    private let doubleTapScale: CGFloat = 2.5
-    private let dragMinimumDistance: CGFloat = 10
-    private let zoomAnimationDuration: Double = 0.25
-
-    @State private var userScale: CGFloat = 1.0
-    @State private var offset: CGSize = .zero
-    @GestureState private var pinchScale: CGFloat = 1.0
-    @GestureState private var dragOffset: CGSize = .zero
-
     var body: some View {
         GeometryReader { proxy in
             let liveScale = clamped(userScale * pinchScale)
