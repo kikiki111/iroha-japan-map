@@ -296,7 +296,7 @@ private final class WeakScriptHandler: NSObject, WKScriptMessageHandler {
 
 /// JapanMapWKWebView を SwiftUI から使うためのラッパー
 struct JapanMapWebViewWrapper: UIViewRepresentable {
-    let prefectures: [Prefecture]
+    let stats: VisitStats
     var mapViewModel: MapViewModel
     @Environment(\.colorScheme) private var colorScheme
 
@@ -314,9 +314,9 @@ struct JapanMapWebViewWrapper: UIViewRepresentable {
     }
 
     func updateUIView(_ webView: JapanMapWKWebView, context: Context) {
-        // タップコールバック（最新の prefectures を常にキャプチャ）
-        webView.onTap = { [prefectures, mapViewModel] code in
-            guard let pref = prefectures.first(where: { $0.id == code }) else { return }
+        // タップコールバック（Prefecture.all は静的なので毎回参照しても安全）
+        webView.onTap = { [mapViewModel] code in
+            guard let pref = Prefecture.by(id: code) else { return }
             mapViewModel.focus(prefecture: pref)
         }
         // 色更新（塗りかけアニメーション検出付き）
@@ -372,16 +372,16 @@ struct JapanMapWebViewWrapper: UIViewRepresentable {
 
             switch milestone {
             case .regionConquest(let region):
-                let codes = prefectures.filter { $0.region == region }.map(\.id)
+                let prefsInRegion = Prefecture.all.filter { $0.region == region }
+                let codes = prefsInRegion.map(\.id)
                 var originalColors: [String: String] = [:]
-                for code in codes {
-                    let hex = prefectures.first(where: { $0.id == code })?.visitColorHex() ?? "#DDDAD4"
-                    originalColors["\(code)"] = hex
+                for pref in prefsInRegion {
+                    originalColors["\(pref.id)"] = stats.colorHex(for: pref)
                 }
                 webView.flashPrefectures(codes: codes, color: "#AFA9EC", durationMs: 300, originalColors: originalColors)
 
             case .nationalConquest:
-                let sortedCodes = prefectures
+                let sortedCodes = Prefecture.all
                     .sorted { $0.latitude > $1.latitude }
                     .map(\.id)
                 webView.waveAnimation(codes: sortedCodes, color: "#534AB7", totalDurationSec: 3.0)
@@ -395,18 +395,17 @@ struct JapanMapWebViewWrapper: UIViewRepresentable {
     // MARK: - Color map
 
     private func buildColorMap() -> [String: String] {
-        let allVisited = mapViewModel.isAllVisited(prefectures: prefectures)
         let mode = mapViewModel.displayMode
-        return Dictionary(uniqueKeysWithValues: prefectures.map { pref in
+        return Dictionary(uniqueKeysWithValues: Prefecture.all.map { pref in
             let hex: String
-            if allVisited {
+            if stats.isAllVisited {
                 hex = "#534AB7"
             } else {
                 switch mode {
                 case .all:
-                    hex = pref.visitColorHex()
+                    hex = stats.colorHex(for: pref)
                 case .unvisited:
-                    hex = pref.isVisited ? "#DDDAD4" : "#9B9890"
+                    hex = stats.isVisited(pref) ? "#DDDAD4" : "#9B9890"
                 }
             }
             return ("\(pref.id)", hex)

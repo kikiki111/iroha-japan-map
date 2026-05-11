@@ -60,3 +60,10 @@ SVG の各 `<path>` 要素に touchend / click イベントリスナーを設定
 `MapDisplayMode` enum で色分けを切替：
 - `.all` — 訪問回数に応じたグラデーション
 - `.unvisited` — 訪問済み=#DDDAD4、未訪問=#C9C3F5（反転表示）
+
+## 関連仕様（変更時に必ず参照）
+
+機能ごとの詳細仕様は別ファイルに分けてある。色やアニメーションを変更する場合は、対応するファイルを必ず読むこと。
+
+- 色更新ロジック（`Utilities/PrefectureColor.swift`）を変更する場合 → [prefecture-coloring.md](prefecture-coloring.md)
+- マイルストーン演出（`MapViewModel.detectMilestone()` ほか）を変更する場合 → [milestone-animation.md](milestone-animation.md)

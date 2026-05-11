@@ -9,8 +9,9 @@ import SwiftData
 import Charts
 
 struct JourneyTrackerView: View {
-    @Query(sort: \Prefecture.id) private var prefectures: [Prefecture]
+    private var prefectures: [Prefecture] { Prefecture.all }
     @Query(sort: \Visit.startDate, order: .reverse) private var visits: [Visit]
+    private var stats: VisitStats { VisitStats(visits: visits) }
 
     @State private var selectedYear: Int = 0
     @State private var showDistanceInfo = false
@@ -23,7 +24,7 @@ struct JourneyTrackerView: View {
 
     // MARK: - Cumulative (all-time)
 
-    private var visitedCount: Int { prefectures.filter(\.isVisited).count }
+    private var visitedCount: Int { stats.visitedCount }
 
     // MARK: - Year filter
 
@@ -404,7 +405,7 @@ struct JourneyTrackerView: View {
                         icon: "airplane.departure",
                         label: "初旅",
                         value: "\(firstVisit.startDate.formatted(.dateTime.year().month().day().locale(Locale(identifier: "ja_JP")))) \u{00B7} \(firstVisit.prefectureName)",
-                        thumbnail: firstVisit.allPhotoThumbnails.first
+                        thumbnail: firstVisit.sortedPhotoThumbnails.first
                     ) {
                         highlightTrip = firstTrip
                     }
@@ -422,7 +423,7 @@ struct JourneyTrackerView: View {
                         icon: "mappin.and.ellipse",
                         label: "最遠地",
                         value: "\(farthest.name)（\(farthestDistance.formatted()) km）",
-                        thumbnail: farthestVisit?.allPhotoThumbnails.first
+                        thumbnail: farthestVisit?.sortedPhotoThumbnails.first
                     ) {
                         if let visit = farthestVisit, let trip = tripContaining(visit) {
                             highlightTrip = trip
@@ -463,7 +464,7 @@ struct JourneyTrackerView: View {
                         icon: "heart.fill",
                         label: "最多",
                         value: "\(top.prefecture.name)（\(top.count)回）",
-                        thumbnail: topVisit?.allPhotoThumbnails.first
+                        thumbnail: topVisit?.sortedPhotoThumbnails.first
                     ) {
                         highlightPrefecture = top.prefecture
                     }
@@ -1181,5 +1182,5 @@ private struct JourneyDataPoint: Identifiable {
 
 #Preview {
     JourneyTrackerView()
-        .modelContainer(for: [Prefecture.self, Visit.self], inMemory: true)
+        .modelContainer(for: [Visit.self], inMemory: true)
 }

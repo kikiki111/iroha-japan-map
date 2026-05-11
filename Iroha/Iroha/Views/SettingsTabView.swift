@@ -7,30 +7,21 @@
 import SwiftUI
 import SwiftData
 import StoreKit
-import UniformTypeIdentifiers
 
 /// 設定画面（プロフィールからpush遷移）
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.requestReview) private var requestReview
+    @Environment(CloudSyncStatusObserver.self) private var cloudSyncStatus
     @Query private var visits: [Visit]
-    @Query(sort: \Prefecture.id) private var prefectures: [Prefecture]
 
     @AppStorage("appearance_mode") private var appearanceMode: Int = 0
-    @AppStorage("last_backup_date") private var lastBackupTimestamp: Double = 0
+    @AppStorage(CloudSyncStatusObserver.syncEnabledKey) private var syncEnabled: Bool = true
     @State private var showResetConfirmation = false
     @State private var showResetFinalConfirmation = false
     @State private var showAppResetConfirmation = false
     @State private var showAppResetFinalConfirmation = false
-    @State private var showBackupConfirmation = false
-    @State private var showImportPicker = false
-    @State private var showRestoreConfirmation = false
-    @State private var pendingRestoreURL: URL?
-    @State private var showRestoreSuccess = false
-    @State private var restoredCount = 0
-    @State private var showRestoreError = false
-    @State private var errorAlertTitle = "復元に失敗しました"
-    @State private var restoreErrorMessage = ""
+    @State private var showSyncRestartNotice = false
 
     private var appearanceLabel: String {
         switch appearanceMode {
@@ -44,16 +35,11 @@ struct SettingsView: View {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
     }
 
-    private var lastBackupLabel: String? {
-        guard lastBackupTimestamp > 0 else { return nil }
-        let date = Date(timeIntervalSince1970: lastBackupTimestamp)
-        return date.formatted(.dateTime.year().month().day().hour().minute().locale(Locale(identifier: "ja_JP")))
-    }
-
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
                 displaySection
+                cloudSyncSection
                 dataSection
                 aboutSection
             }
@@ -76,13 +62,25 @@ struct SettingsView: View {
         } message: {
             Text("この操作は元に戻せません。")
         }
-        .alert("すべてのデータを削除しますか？", isPresented: $showResetFinalConfirmation) {
+        .alert(
+            syncEnabled ? "iCloud 上のデータも削除されます" : "すべてのデータを削除しますか？",
+            isPresented: $showResetFinalConfirmation
+        ) {
             Button("キャンセル", role: .cancel) {}
             Button("削除", role: .destructive) {
                 resetAll()
             }
         } message: {
-            Text("すべての旅行記録・写真・マイルストーンが削除されます。")
+            Text(
+                syncEnabled
+                    ? "iCloud 同期が有効です。削除はクラウドにも反映され、他の端末からも記録が消えます。続行しますか？"
+                    : "すべての旅行記録・写真・マイルストーンが削除されます。"
+            )
+        }
+        .alert("次回起動時に反映されます", isPresented: $showSyncRestartNotice) {
+            Button("OK") {}
+        } message: {
+            Text("iCloud 同期の設定変更は、アプリを終了して再起動した後から有効になります。")
         }
         .alert("アプリを初期化しますか？", isPresented: $showAppResetConfirmation) {
             Button("キャンセル", role: .cancel) {}
@@ -100,36 +98,57 @@ struct SettingsView: View {
         } message: {
             Text("アプリが新規インストール時の状態に戻ります。")
         }
-        .alert("バックアップから復元しますか？", isPresented: $showRestoreConfirmation) {
-            Button("キャンセル", role: .cancel) { pendingRestoreURL = nil }
-            Button("復元") { performRestore() }
-        } message: {
-            Text("現在のデータはすべて上書きされます。写真は復元されません。現在の写真付き記録も写真なしになります。")
-        }
-        .alert("復元しました", isPresented: $showRestoreSuccess) {
-            Button("OK") {}
-        } message: {
-            Text("\(restoredCount)件の旅行記録を読み込みました。")
-        }
-        .alert(errorAlertTitle, isPresented: $showRestoreError) {
-            Button("OK") {}
-        } message: {
-            Text(restoreErrorMessage)
-        }
-        .fileImporter(isPresented: $showImportPicker, allowedContentTypes: [.json]) { result in
-            switch result {
-            case .success(let url):
-                pendingRestoreURL = url
-                showRestoreConfirmation = true
-            case .failure(let error):
-                errorAlertTitle = "ファイルを読み込めませんでした"
-                restoreErrorMessage = error.localizedDescription
-                showRestoreError = true
-            }
-        }
     }
 
     // MARK: - Sections
+
+    private var cloudSyncSection: some View {
+        VStack(spacing: 0) {
+            sectionHeader("iCloud 同期")
+            settingsGroup {
+                HStack(spacing: 10) {
+                    settingsIcon(icon: "icloud", bg: .irohaFuji)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("自動同期")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundColor(.irohaSumi)
+                        Text("写真を含む記録を iCloud に保存")
+                            .font(.system(size: 11))
+                            .foregroundColor(.irohaSumi3)
+                    }
+                    Spacer()
+                    Toggle("", isOn: Binding(
+                        get: { syncEnabled },
+                        set: { newValue in
+                            syncEnabled = newValue
+                            showSyncRestartNotice = true
+                        }
+                    ))
+                    .labelsHidden()
+                    .tint(.irohaFuji)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+
+                Divider().padding(.leading, 50)
+
+                HStack(spacing: 10) {
+                    settingsIcon(icon: cloudSyncStatus.state.iconName, bg: cloudSyncStatus.state.displayColor)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("状態")
+                            .font(.system(size: 13))
+                            .foregroundColor(.irohaSumi3)
+                        Text(cloudSyncStatus.state.displayLabel)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(cloudSyncStatus.state.displayColor)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+            }
+        }
+    }
 
     private var displaySection: some View {
         VStack(spacing: 0) {
@@ -146,10 +165,6 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             sectionHeader("データ")
             settingsGroup {
-                backupExportRow
-                Divider().padding(.leading, 50)
-                backupImportRow
-                Divider().padding(.leading, 50)
                 Button(role: .destructive) {
                     showResetConfirmation = true
                 } label: {
@@ -229,7 +244,7 @@ struct SettingsView: View {
                 Text("今日の記憶")
                     .font(.system(size: 15, weight: .medium))
                     .foregroundColor(.irohaSumi)
-                Text("過去の同じ日の旅行をカードで表示")
+                Text("◯年前の今日の旅をホームに表示")
                     .font(.system(size: 11))
                     .foregroundColor(.irohaSumi3)
             }
@@ -245,12 +260,12 @@ struct SettingsView: View {
         .padding(.vertical, 5)
     }
 
-    // MARK: - Appearance
+    // MARK: - Display rows
 
     private var appearanceRow: some View {
         HStack(spacing: 10) {
             settingsIcon(icon: "circle.lefthalf.filled")
-            Text("ダークモード")
+            Text("外観")
                 .font(.system(size: 15, weight: .medium))
                 .foregroundColor(.irohaSumi)
             Spacer()
@@ -260,10 +275,83 @@ struct SettingsView: View {
                 Text("ダーク").tag(2)
             }
             .pickerStyle(.menu)
-            .tint(.irohaSumi3)
+            .tint(.irohaSumi2)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 5)
+    }
+
+    // MARK: - About rows
+
+    private var privacyPolicyRow: some View {
+        NavigationLink(destination: PrivacyPolicyView()) {
+            HStack(spacing: 10) {
+                settingsIcon(icon: "lock.fill", bg: .irohaSumi2)
+                Text("プライバシーポリシー")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(.irohaSumi)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.irohaSumi3)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+        }
+    }
+
+    private var feedbackRow: some View {
+        Button {
+            requestReview()
+        } label: {
+            HStack(spacing: 10) {
+                settingsIcon(icon: "star.fill", bg: .irohaFuji)
+                Text("レビューする")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(.irohaSumi)
+                Spacer()
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.irohaSumi3)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+        }
+    }
+
+    // MARK: - Actions
+
+    private func resetApp() {
+        resetAll()
+        UserDefaults.standard.removeObject(forKey: "onboarding_done")
+        UserDefaults.standard.removeObject(forKey: "appearance_mode")
+        UserDefaults.standard.removeObject(forKey: "last_backup_date")
+        UserDefaults.standard.removeObject(forKey: "show_memory_card")
+        appearanceMode = 0
+    }
+
+    private func resetAll() {
+        let filenames = Set(visits.flatMap(\.allPhotoFilenames))
+        for visit in visits {
+            modelContext.delete(visit)
+        }
+        if (try? modelContext.save()) != nil {
+            for filename in filenames {
+                PhotoStorageManager.delete(filename: filename)
+            }
+        }
+        clearMilestoneFlags()
+    }
+
+    private func clearMilestoneFlags() {
+        for count in MapViewModel.countMilestones {
+            UserDefaults.standard.removeObject(forKey: "milestone_\(count)_shown")
+        }
+        UserDefaults.standard.removeObject(forKey: "milestone_25_shown")
+        UserDefaults.standard.removeObject(forKey: "milestone_47_shown")
+        for region in Region.allCases {
+            UserDefaults.standard.removeObject(forKey: "region_\(region.rawValue)_shown")
+        }
     }
 
     // MARK: - Components
@@ -315,190 +403,6 @@ struct SettingsView: View {
             .foregroundColor(.irohaSumi2)
             .frame(width: 26, height: 26)
     }
-
-    private func settingsToggleRow(icon: String, iconBg: Color, label: String, key: String, defaultOn: Bool = true) -> some View {
-        HStack(spacing: 10) {
-            settingsIcon(icon: icon, bg: iconBg)
-            Text(label)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundColor(.irohaSumi)
-            Spacer()
-            Toggle("", isOn: Binding(
-                get: { UserDefaults.standard.object(forKey: key) as? Bool ?? defaultOn },
-                set: { UserDefaults.standard.set($0, forKey: key) }
-            ))
-            .labelsHidden()
-            .tint(.irohaFuji)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 5)
-    }
-
-    // MARK: - Backup
-
-    private var backupExportRow: some View {
-        Button {
-            showBackupConfirmation = true
-        } label: {
-            HStack(spacing: 10) {
-                settingsIcon(icon: "square.and.arrow.up", bg: .irohaFuji)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("バックアップを作成")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundColor(.irohaSumi)
-                    if let dateLabel = lastBackupLabel {
-                        Text("前回: \(dateLabel)")
-                            .font(.system(size: 11))
-                            .foregroundColor(.irohaSumi3)
-                    }
-                }
-                Spacer()
-                Image(systemName: "doc.badge.plus")
-                    .font(.system(size: 14))
-                    .foregroundColor(.irohaFuji)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-        }
-        .alert("バックアップを作成しますか？", isPresented: $showBackupConfirmation) {
-            Button("作成") { exportBackup() }
-            Button("キャンセル", role: .cancel) { }
-        } message: {
-            Text("現在の旅行記録をJSON形式で書き出します。写真は含まれません。")
-        }
-    }
-
-    private var backupImportRow: some View {
-        Button {
-            showImportPicker = true
-        } label: {
-            HStack(spacing: 10) {
-                settingsIcon(icon: "square.and.arrow.down", bg: .irohaFuji)
-                Text("バックアップから復元")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(.irohaSumi)
-                Spacer()
-                Image(systemName: "doc.badge.arrow.up")
-                    .font(.system(size: 14))
-                    .foregroundColor(.irohaSumi3)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-        }
-    }
-
-    // MARK: - About rows
-
-    private var privacyPolicyRow: some View {
-        NavigationLink(destination: PrivacyPolicyView()) {
-            HStack(spacing: 10) {
-                settingsIcon(icon: "lock.fill", bg: .irohaSumi2)
-                Text("プライバシーポリシー")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(.irohaSumi)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.irohaSumi3)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-        }
-    }
-
-    private var feedbackRow: some View {
-        Button {
-            requestReview()
-        } label: {
-            HStack(spacing: 10) {
-                settingsIcon(icon: "star.fill", bg: .irohaFuji)
-                Text("レビューする")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(.irohaSumi)
-                Spacer()
-                Image(systemName: "arrow.up.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.irohaSumi3)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-        }
-    }
-
-    // MARK: - Actions
-
-    private func exportBackup() {
-        do {
-            let url = try BackupManager.export(prefectures: prefectures)
-            lastBackupTimestamp = Date().timeIntervalSince1970
-
-            guard
-                let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                let window = scene.keyWindow,
-                let rootVC = window.rootViewController
-            else { return }
-
-            let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-            if let popover = controller.popoverPresentationController {
-                popover.sourceView = window
-                popover.sourceRect = CGRect(x: window.bounds.midX, y: window.bounds.midY, width: 0, height: 0)
-                popover.permittedArrowDirections = []
-            }
-            rootVC.present(controller, animated: true)
-        } catch {
-            errorAlertTitle = "バックアップ作成に失敗しました"
-            restoreErrorMessage = error.localizedDescription
-            showRestoreError = true
-        }
-    }
-
-    private func performRestore() {
-        guard let url = pendingRestoreURL else { return }
-        do {
-            let count = try BackupManager.restore(from: url, prefectures: prefectures, context: modelContext)
-            restoredCount = count
-            showRestoreSuccess = true
-        } catch {
-            errorAlertTitle = "復元に失敗しました"
-            restoreErrorMessage = error.localizedDescription
-            showRestoreError = true
-        }
-        pendingRestoreURL = nil
-    }
-
-    private func resetApp() {
-        resetAll()
-        UserDefaults.standard.removeObject(forKey: "onboarding_done")
-        UserDefaults.standard.removeObject(forKey: "appearance_mode")
-        UserDefaults.standard.removeObject(forKey: "last_backup_date")
-        UserDefaults.standard.removeObject(forKey: "show_memory_card")
-        appearanceMode = 0
-        lastBackupTimestamp = 0
-    }
-
-    private func resetAll() {
-        let filenames = Set(visits.flatMap(\.allPhotoFilenames))
-        for visit in visits {
-            modelContext.delete(visit)
-        }
-        if (try? modelContext.save()) != nil {
-            for filename in filenames {
-                PhotoStorageManager.delete(filename: filename)
-            }
-        }
-        clearMilestoneFlags()
-    }
-
-    private func clearMilestoneFlags() {
-        for count in MapViewModel.countMilestones {
-            UserDefaults.standard.removeObject(forKey: "milestone_\(count)_shown")
-        }
-        UserDefaults.standard.removeObject(forKey: "milestone_25_shown")
-        UserDefaults.standard.removeObject(forKey: "milestone_47_shown")
-        for region in Region.allCases {
-            UserDefaults.standard.removeObject(forKey: "region_\(region.rawValue)_shown")
-        }
-    }
 }
 
 // MARK: - Preview
@@ -507,5 +411,6 @@ struct SettingsView: View {
     NavigationStack {
         SettingsView()
     }
-    .modelContainer(for: [Prefecture.self, Visit.self], inMemory: true)
+    .modelContainer(for: [Visit.self], inMemory: true)
+    .environment(CloudSyncStatusObserver())
 }

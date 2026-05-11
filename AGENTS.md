@@ -4,19 +4,21 @@
 日本47都道府県旅行記録アプリ「Iroha（いろは）」
 
 ## 技術スタック
-- Swift 6.0 / SwiftUI / SwiftData / iOS 17+
+- Swift 6.0 / SwiftUI / SwiftData / iOS 18+
 - 地図: Geolonia SVG + WKWebView（MapKit の地図表示は使わない。検索 API は許可）
-- 写真: PhotosUI (PhotosPicker) + Documents/Photos/ にファイル保存
-- 通知: UserNotifications (UNCalendarNotificationTrigger)
+- 写真: PhotosUI (PhotosPicker) + VisitPhoto モデルで SwiftData / CloudKit 同期
+  （旧 Documents/Photos/ ファイルは PhotoMigration で順次転記、Phase A は併存）
+- 永続化: SwiftData (Visit, VisitPhoto) + 静的 struct (Prefecture)
+- クラウド同期: CloudKit Private DB (Phase 6 で有効化予定)
 - アーキテクチャ: MVVM + @Observable
 
 ## ファイル構成
-Iroha/Models/ — @Model クラス（Prefecture, Visit）+ enum（Region, VisitTag, VisitMood）+ struct（Trip）
+Iroha/Models/ — @Model クラス（Visit, VisitPhoto）+ static struct（Prefecture）+ enum（Region, VisitTag, VisitMood, VisitTransport, Badge/BadgeCategory/TravelerTier）+ struct（Trip）
 Iroha/ViewModels/ — @Observable クラス（MapViewModel）
-Iroha/Views/ — SwiftUI View
-Iroha/Views/Components/ — 再利用可能な小コンポーネント（NurikakeNumber, SearchOverlayView, VisitMoodBadge, VisitTagBadge）
-Iroha/Services/ — ビジネスロジック（TripDetector, PhotoStorageManager, MemoryNotificationManager）
-Iroha/Utilities/ — ヘルパー（PrefectureColor, ShareManager）
+Iroha/Views/ — SwiftUI View（CloudSyncOnboardingView 含む）
+Iroha/Views/Components/ — 再利用可能な小コンポーネント（NurikakeNumber, VisitMoodBadge, VisitTagBadge, VisitTransportBadge, VisitCompanionBadge, BadgeCollectionView, BadgeStampView, LocationSearchCompleter, SakuraEffectView）
+Iroha/Services/ — ビジネスロジック（TripDetector, PhotoStorageManager, VisitPhotoStore, VisitPrefectureMigration, PhotoMigration, CloudSyncStatusObserver）
+Iroha/Utilities/ — ヘルパー（PrefectureColor, VisitStats, ShareManager, DistanceCalculator）
 Iroha/Resources/ — SVG・アセット
 
 ## 禁止事項

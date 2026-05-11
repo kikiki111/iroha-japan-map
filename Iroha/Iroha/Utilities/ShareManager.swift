@@ -11,15 +11,19 @@ enum ShareManager {
 
     private static var snapshotWebView: WKWebView?
 
-    static func shareMap(prefectures: [Prefecture], visitedNames: Set<String>? = nil, year: Int? = nil) {
-        let effectiveVisited = visitedNames ?? Set(prefectures.filter(\.isVisited).map(\.name))
+    /// 地図共有エントリポイント。
+    /// - Parameter stats: 表示する訪問集計。年別シェアは年でフィルタした visits で
+    ///   作った `VisitStats` を渡すこと (全期間の stats を渡すと年別マップが
+    ///   全期間表示になる)。
+    static func shareMap(stats: VisitStats, year: Int? = nil) {
+        let effectiveVisited = Set(stats.visitedPrefectures.map(\.name))
 
-        renderMapSnapshot(prefectures: prefectures, visitedNames: effectiveVisited) { mapImage in
+        renderMapSnapshot(stats: stats, visitedNames: effectiveVisited) { mapImage in
             guard let mapImage else { return }
 
             let visitedCount = effectiveVisited.count
             let conqueredRegions = Region.allCases.filter { region in
-                let regionPrefs = prefectures.filter { $0.region == region }
+                let regionPrefs = Prefecture.all.filter { $0.region == region }
                 return !regionPrefs.isEmpty && regionPrefs.allSatisfy { effectiveVisited.contains($0.name) }
             }.count
 
@@ -27,7 +31,6 @@ enum ShareManager {
                 mapImage: mapImage,
                 visitedCount: visitedCount,
                 conqueredRegions: conqueredRegions,
-                prefectures: prefectures,
                 visitedNames: effectiveVisited,
                 year: year
             )
@@ -46,7 +49,7 @@ enum ShareManager {
     // MARK: - Map snapshot via WKWebView
 
     private static func renderMapSnapshot(
-        prefectures: [Prefecture],
+        stats: VisitStats,
         visitedNames: Set<String>,
         completion: @escaping @MainActor (UIImage?) -> Void
     ) {
@@ -56,7 +59,7 @@ enum ShareManager {
             return
         }
 
-        let html = buildSnapshotHTML(svgContent: svgContent, prefectures: prefectures, visitedNames: visitedNames)
+        let html = buildSnapshotHTML(svgContent: svgContent, stats: stats, visitedNames: visitedNames)
 
         let config = WKWebViewConfiguration()
         let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 600, height: 600), configuration: config)
@@ -74,9 +77,9 @@ enum ShareManager {
         webView.loadHTMLString(html, baseURL: Bundle.main.bundleURL)
     }
 
-    private static func buildSnapshotHTML(svgContent: String, prefectures: [Prefecture], visitedNames: Set<String>) -> String {
-        let colorEntries = prefectures.map { pref in
-            let hex = visitedNames.contains(pref.name) ? pref.visitColorHex() : "#DDDAD4"
+    private static func buildSnapshotHTML(svgContent: String, stats: VisitStats, visitedNames: Set<String>) -> String {
+        let colorEntries = Prefecture.all.map { pref in
+            let hex = visitedNames.contains(pref.name) ? stats.colorHex(for: pref) : "#DDDAD4"
             return "'\(pref.id)': '\(hex)'"
         }.joined(separator: ", ")
 
@@ -159,7 +162,6 @@ private struct ShareCardView: View {
     let mapImage: UIImage
     let visitedCount: Int
     let conqueredRegions: Int
-    let prefectures: [Prefecture]
     let visitedNames: Set<String>
     let year: Int?
 
@@ -261,7 +263,7 @@ private struct ShareCardView: View {
             ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                 HStack(spacing: 4) {
                     ForEach(row, id: \.rawValue) { region in
-                        let isConquered = prefectures
+                        let isConquered = Prefecture.all
                             .filter { $0.region == region }
                             .allSatisfy { visitedNames.contains($0.name) }
 

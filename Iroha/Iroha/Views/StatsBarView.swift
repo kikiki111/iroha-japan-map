@@ -9,12 +9,14 @@ import SwiftData
 
 /// 地図の下に表示する統計バー
 struct IrohaStatsBar: View {
-    let prefectures: [Prefecture]
     var mapViewModel: MapViewModel
 
-    private var visitedCount: Int { mapViewModel.visitedPrefectureCount(prefectures: prefectures) }
-    private var totalVisits: Int { mapViewModel.totalVisitCount(prefectures: prefectures) }
-    private var ratio: Double { mapViewModel.achievementRatio(prefectures: prefectures) }
+    @Query(sort: \Visit.startDate, order: .reverse) private var visits: [Visit]
+
+    private var stats: VisitStats { VisitStats(visits: visits) }
+    private var visitedCount: Int { mapViewModel.visitedPrefectureCount(stats: stats) }
+    private var totalVisits: Int { mapViewModel.totalVisitCount(stats: stats) }
+    private var ratio: Double { mapViewModel.achievementRatio(stats: stats) }
 
     @State private var selectedRegion: MapViewModel.RegionProgress?
 
@@ -59,7 +61,7 @@ struct IrohaStatsBar: View {
 
             // 8-region dots
             HStack(spacing: 0) {
-                ForEach(mapViewModel.regionProgressList(prefectures: prefectures).reversed()) { progress in
+                ForEach(mapViewModel.regionProgressList(stats: stats).reversed()) { progress in
                     Button {
                         withAnimation(.easeInOut(duration: 0.2)) {
                             if selectedRegion?.id == progress.id {
@@ -142,9 +144,8 @@ struct IrohaStatsBar: View {
 
 #Preview {
     @Previewable @State var vm = MapViewModel()
-    @Previewable @Query(sort: \Prefecture.id) var prefs: [Prefecture]
-    IrohaStatsBar(prefectures: prefs, mapViewModel: vm)
+    IrohaStatsBar(mapViewModel: vm)
         .padding()
         .background(Color.irohaWashi)
-        .modelContainer(for: [Prefecture.self, Visit.self], inMemory: true)
+        .modelContainer(for: [Visit.self], inMemory: true)
 }

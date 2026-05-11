@@ -9,12 +9,12 @@ import SwiftData
 
 /// 県詳細シート
 struct PrefectureDetailSheet: View {
-    @Bindable var prefecture: Prefecture
+    let prefecture: Prefecture
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
-    @Query(sort: \Prefecture.id) private var allPrefectures: [Prefecture]
+    @Query(sort: \Visit.startDate, order: .reverse) private var allVisits: [Visit]
 
     @State private var showAddVisit = false
     @State private var editingVisit: Visit?
@@ -24,12 +24,14 @@ struct PrefectureDetailSheet: View {
     @State private var showPhotoLoadError = false
 
     private var sortedVisits: [Visit] {
-        prefecture.visits.sorted { $0.startDate > $1.startDate }
+        allVisits.filter { $0.prefectureID == prefecture.id }
     }
 
-    private var allPhotoItems: [(filename: String, thumbnail: Data)] {
+    private var visitCount: Int { sortedVisits.count }
+
+    private var allPhotoItems: [(visit: Visit, identifier: String, thumbnail: Data)] {
         sortedVisits.flatMap { visit in
-            zip(visit.allPhotoFilenames, visit.allPhotoThumbnails).map { ($0, $1) }
+            zip(visit.sortedPhotoFilenames, visit.sortedPhotoThumbnails).map { (visit, $0, $1) }
         }
     }
 
@@ -46,11 +48,11 @@ struct PrefectureDetailSheet: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $showAddVisit) {
-                VisitFormView(prefectures: allPrefectures, prefecture: prefecture, editingVisit: nil)
+                VisitFormView(prefectures: Prefecture.all, prefecture: prefecture, editingVisit: nil)
                     .environment(\.locale, Locale(identifier: "ja_JP"))
             }
             .sheet(item: $editingVisit) { visit in
-                VisitFormView(prefectures: allPrefectures, prefecture: prefecture, editingVisit: visit)
+                VisitFormView(prefectures: Prefecture.all, prefecture: prefecture, editingVisit: visit)
                     .environment(\.locale, Locale(identifier: "ja_JP"))
             }
             .alert("旅行記録を削除しますか？", isPresented: $showDeleteConfirmation) {
@@ -135,8 +137,8 @@ struct PrefectureDetailSheet: View {
 
             VStack(spacing: 3) {
                 // 訪問数（塗りかけ）
-                NurikakeNumber(value: prefecture.visitCount, fontSize: 44,
-                              ratio: min(Double(prefecture.visitCount) / 5.0, 1.0))
+                NurikakeNumber(value: visitCount, fontSize: 44,
+                              ratio: min(Double(visitCount) / 5.0, 1.0))
                 Text("回旅行")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.irohaSumi3)
@@ -169,10 +171,10 @@ struct PrefectureDetailSheet: View {
 
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
-                        ForEach(Array(items.enumerated()), id: \.element.filename) { _, item in
+                        ForEach(Array(items.enumerated()), id: \.element.identifier) { _, item in
                             if let uiImage = UIImage(data: item.thumbnail) {
                                 Button {
-                                    openPhoto(filename: item.filename)
+                                    openPhoto(identifier: item.identifier, in: item.visit)
                                 } label: {
                                     Image(uiImage: uiImage)
                                         .resizable()
@@ -196,7 +198,7 @@ struct PrefectureDetailSheet: View {
 
     private var todayVisit: Visit? {
         let calendar = Calendar.current
-        return prefecture.visits.first { calendar.isDateInToday($0.startDate) }
+        return sortedVisits.first { calendar.isDateInToday($0.startDate) }
     }
 
     private var quickRecordButton: some View {
@@ -224,8 +226,11 @@ struct PrefectureDetailSheet: View {
                 }
             } else {
                 Button {
-                    let visit = Visit(prefectureName: prefecture.name, startDate: Date())
-                    visit.prefecture = prefecture
+                    let visit = Visit(
+                        prefectureName: prefecture.name,
+                        prefectureID: prefecture.id,
+                        startDate: Date()
+                    )
                     modelContext.insert(visit)
                     try? modelContext.save()
                 } label: {
@@ -349,11 +354,11 @@ struct PrefectureDetailSheet: View {
 
             Spacer()
 
-            if let thumbnailData = visit.allPhotoThumbnails.first,
+            if let thumbnailData = visit.sortedPhotoThumbnails.first,
                let uiImage = UIImage(data: thumbnailData) {
                 Button {
-                    if let filename = visit.allPhotoFilenames.first {
-                        openPhoto(filename: filename)
+                    if let identifier = visit.sortedPhotoFilenames.first {
+                        openPhoto(identifier: identifier, in: visit)
                     }
                 } label: {
                     ZStack {
@@ -363,8 +368,9 @@ struct PrefectureDetailSheet: View {
                             .frame(width: 40, height: 40)
                             .clipped()
                             .clipShape(RoundedRectangle(cornerRadius: 6))
-                        if visit.allPhotoFilenames.count > 1 {
-                            Text("+\(visit.allPhotoFilenames.count - 1)")
+                        let count = visit.totalPhotoCount
+                        if count > 1 {
+                            Text("+\(count - 1)")
                                 .font(.system(size: 10, weight: .bold))
                                 .foregroundColor(.white)
                                 .frame(width: 40, height: 40)
@@ -401,8 +407,8 @@ struct PrefectureDetailSheet: View {
         kana.map { String($0) }.joined(separator: " ")
     }
 
-    private func openPhoto(filename: String) {
-        if let image = PhotoStorageManager.loadImage(filename: filename) {
+    private func openPhoto(identifier: String, in visit: Visit) {
+        if let image = VisitPhotoStore.loadFullImage(for: identifier, in: visit) {
             fullScreenPhoto = image
         } else {
             showPhotoLoadError = true
@@ -432,5 +438,5 @@ extension View {
             )
             .presentationDetents([.fraction(0.7)])
         }
-        .modelContainer(for: [Prefecture.self, Visit.self], inMemory: true)
+        .modelContainer(for: [Visit.self], inMemory: true)
 }

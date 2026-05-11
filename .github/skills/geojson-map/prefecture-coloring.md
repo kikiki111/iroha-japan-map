@@ -1,9 +1,6 @@
----
-mode: agent
-description: 訪問回数で色の深さが変わるシステム（実装済み）
----
-
 # PrefectureColor 実装仕様（実装済み）
+
+> 訪問回数で色の深さが変わるシステム。色を変更する際は必ずこのファイルを参照すること。
 
 ## ファイル
 `Utilities/PrefectureColor.swift`

@@ -12,7 +12,18 @@ import SwiftData
 struct JapanMapView: View {
     var mapViewModel: MapViewModel
 
-    @Query(sort: \Prefecture.id) private var prefectures: [Prefecture]
+    @Query(sort: \Visit.startDate, order: .reverse) private var visits: [Visit]
+
+    private let minScale: CGFloat = 1.0
+    private let maxScale: CGFloat = 4.0
+    private let doubleTapScale: CGFloat = 2.5
+    private let dragMinimumDistance: CGFloat = 10
+    private let zoomAnimationDuration: Double = 0.25
+
+    @State private var userScale: CGFloat = 1.0
+    @State private var offset: CGSize = .zero
+    @GestureState private var pinchScale: CGFloat = 1.0
+    @GestureState private var dragOffset: CGSize = .zero
 
     private let minScale: CGFloat = 1.0
     private let maxScale: CGFloat = 4.0
@@ -37,7 +48,7 @@ struct JapanMapView: View {
                 size: proxy.size
             )
 
-            JapanMapWebViewWrapper(prefectures: prefectures, mapViewModel: mapViewModel)
+            JapanMapWebViewWrapper(stats: VisitStats(visits: visits), mapViewModel: mapViewModel)
                 .transaction { $0.animation = nil }
                 .scaleEffect(mapViewModel.mapScale * liveScale)
                 .offset(liveOffset)
@@ -119,5 +130,5 @@ struct JapanMapView: View {
         JapanMapView(mapViewModel: vm)
             .padding()
     }
-    .modelContainer(for: [Prefecture.self, Visit.self], inMemory: true)
+    .modelContainer(for: [Visit.self], inMemory: true)
 }

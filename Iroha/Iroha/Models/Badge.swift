@@ -51,18 +51,18 @@ enum TravelerTier: Int, CaseIterable, Identifiable {
         }
     }
 
-    func isUnlocked(prefectures: [Prefecture], visits: [Visit]) -> Bool {
+    func isUnlocked(visits: [Visit], stats: VisitStats) -> Bool {
         guard self != .beginner else { return true }
         let prev = TravelerTier(rawValue: rawValue - 1)!
         let prevBadges = Badge.badges(for: prev)
-        let earned = prevBadges.filter { $0.isEarned(prefectures: prefectures, visits: visits) }.count
+        let earned = prevBadges.filter { $0.isEarned(visits: visits, stats: stats) }.count
         return earned >= thresholdFromPrevious
     }
 
-    static func currentTier(prefectures: [Prefecture], visits: [Visit]) -> TravelerTier {
+    static func currentTier(visits: [Visit], stats: VisitStats) -> TravelerTier {
         var tier = TravelerTier.beginner
         for t in allCases where t != .beginner {
-            if t.isUnlocked(prefectures: prefectures, visits: visits) {
+            if t.isUnlocked(visits: visits, stats: stats) {
                 tier = t
             }
         }
@@ -461,7 +461,7 @@ enum Badge: String, CaseIterable, Identifiable {
 
     private static let landlockedIDs: Set<Int> = [9, 10, 11, 19, 20, 21, 25, 29]
 
-    func isEarned(prefectures: [Prefecture], visits: [Visit]) -> Bool {
+    func isEarned(visits: [Visit], stats: VisitStats) -> Bool {
         switch self {
 
         // ── Tier 1: 初心者 ──
@@ -476,13 +476,10 @@ enum Badge: String, CaseIterable, Identifiable {
             return visits.count >= 50
 
         case .nationalConquest:
-            return prefectures.filter(\.isVisited).count >= 47
+            return stats.visitedCount >= 47
 
         case .regionConquest:
-            return Region.allCases.contains { region in
-                let group = prefectures.filter { $0.region == region }
-                return !group.isEmpty && group.allSatisfy(\.isVisited)
-            }
+            return Region.allCases.contains { stats.isRegionConquered($0) }
 
         case .fourSeasons:
             let calendar = Calendar.current
@@ -498,14 +495,13 @@ enum Badge: String, CaseIterable, Identifiable {
             return tags.count >= 3
 
         case .landlocked:
-            let visitedIDs = Set(prefectures.filter(\.isVisited).map(\.id))
-            return Self.landlockedIDs.isSubset(of: visitedIDs)
+            return Self.landlockedIDs.isSubset(of: stats.visitedIDs)
 
         case .firstPhoto:
             return visits.contains(where: \.hasPhotos)
 
         case .hundredPhotos:
-            return visits.reduce(0) { $0 + $1.allPhotoFilenames.count } >= 100
+            return visits.reduce(0) { $0 + $1.totalPhotoCount } >= 100
 
         case .sixMoods:
             let moods = Set(visits.map(\.effectiveMood))
@@ -523,18 +519,14 @@ enum Badge: String, CaseIterable, Identifiable {
             return visits.count >= 100
 
         case .twentyPrefectures:
-            return prefectures.filter(\.isVisited).count >= 20
+            return stats.visitedCount >= 20
 
         case .multiPrefTrip:
             let trips = TripDetector.detect(from: visits)
             return trips.contains { $0.prefectureNames.count >= 3 }
 
         case .threeRegions:
-            let completed = Region.allCases.filter { region in
-                let group = prefectures.filter { $0.region == region }
-                return !group.isEmpty && group.allSatisfy(\.isVisited)
-            }
-            return completed.count >= 3
+            return Region.allCases.filter { stats.isRegionConquered($0) }.count >= 3
 
         case .samePrefFourSeasons:
             let calendar = Calendar.current
@@ -560,7 +552,7 @@ enum Badge: String, CaseIterable, Identifiable {
             return prefsWithPhotos.count >= 10
 
         case .threeHundredPhotos:
-            return visits.reduce(0) { $0 + $1.allPhotoFilenames.count } >= 300
+            return visits.reduce(0) { $0 + $1.totalPhotoCount } >= 300
 
         case .moodGeography:
             let grouped = Dictionary(grouping: visits, by: \.prefectureName)
@@ -578,7 +570,7 @@ enum Badge: String, CaseIterable, Identifiable {
             return visits.count >= 200
 
         case .thirtyFivePrefectures:
-            return prefectures.filter(\.isVisited).count >= 35
+            return stats.visitedCount >= 35
 
         case .repeatVisitor:
             let grouped = Dictionary(grouping: visits, by: \.prefectureName)
@@ -595,11 +587,7 @@ enum Badge: String, CaseIterable, Identifiable {
             }
 
         case .fiveRegions:
-            let completed = Region.allCases.filter { region in
-                let group = prefectures.filter { $0.region == region }
-                return !group.isEmpty && group.allSatisfy(\.isVisited)
-            }
-            return completed.count >= 5
+            return Region.allCases.filter { stats.isRegionConquered($0) }.count >= 5
 
         case .nightOwl:
             let calendar = Calendar.current
@@ -616,11 +604,10 @@ enum Badge: String, CaseIterable, Identifiable {
             return VisitTransport.selectable.allSatisfy { all.contains($0) }
 
         case .islandHopper:
-            let visited = Set(prefectures.filter(\.isVisited).map(\.id))
-            let hasHokkaido = prefectures.filter(\.isVisited).contains { $0.region == .hokkaido }
-            let hasShikoku = prefectures.filter(\.isVisited).contains { $0.region == .shikoku }
-            let hasKyushu = prefectures.filter(\.isVisited).contains { $0.region == .kyushu }
-            let hasOkinawa = visited.contains(47)
+            let hasHokkaido = stats.visitedPrefectures.contains { $0.region == .hokkaido }
+            let hasShikoku = stats.visitedPrefectures.contains { $0.region == .shikoku }
+            let hasKyushu = stats.visitedPrefectures.contains { $0.region == .kyushu }
+            let hasOkinawa = stats.visitedIDs.contains(47)
             return hasHokkaido && hasShikoku && hasKyushu && hasOkinawa
 
         case .twentyPhotoPrefectures:
@@ -628,7 +615,7 @@ enum Badge: String, CaseIterable, Identifiable {
             return prefsWithPhotos.count >= 20
 
         case .fiveHundredPhotos:
-            return visits.reduce(0) { $0 + $1.allPhotoFilenames.count } >= 500
+            return visits.reduce(0) { $0 + $1.totalPhotoCount } >= 500
 
         case .locationLogger:
             return visits.filter(\.hasLocation).count >= 30
@@ -643,7 +630,7 @@ enum Badge: String, CaseIterable, Identifiable {
             return visits.count >= 500
 
         case .allFortySevenAgain:
-            return prefectures.allSatisfy { $0.visitCount >= 2 }
+            return Prefecture.all.allSatisfy { stats.count(for: $0) >= 2 }
 
         case .thousandDays:
             guard let earliest = visits.map(\.startDate).min(),
@@ -656,10 +643,7 @@ enum Badge: String, CaseIterable, Identifiable {
             return trips.contains { $0.prefectureNames.count >= 5 }
 
         case .allRegionsConquest:
-            return Region.allCases.allSatisfy { region in
-                let group = prefectures.filter { $0.region == region }
-                return !group.isEmpty && group.allSatisfy(\.isVisited)
-            }
+            return Region.allCases.allSatisfy { stats.isRegionConquered($0) }
 
         case .yearRoundTraveler:
             let calendar = Calendar.current
@@ -680,7 +664,7 @@ enum Badge: String, CaseIterable, Identifiable {
             return prefsWithPhotos.count >= 47
 
         case .thousandPhotos:
-            return visits.reduce(0) { $0 + $1.allPhotoFilenames.count } >= 1000
+            return visits.reduce(0) { $0 + $1.totalPhotoCount } >= 1000
 
         case .moodMaster:
             let moodCounts = Dictionary(grouping: visits.map(\.effectiveMood).filter { $0 != .none }, by: \.self)

@@ -10,6 +10,10 @@ import SwiftData
 @Model
 final class Visit {
     var prefectureName: String = ""
+    /// `Prefecture.id` (1〜47)。`Prefecture` を SwiftData から外したため、
+    /// 訪問先の参照キーとして保持する。既存 Visit は `VisitPrefectureMigration` で
+    /// `prefectureName` から backfill される。
+    var prefectureID: Int = 0
     /// 旧 `date` 属性からのライトウェイトマイグレーション対応
     @Attribute(originalName: "date")
     var startDate: Date = Date()
@@ -41,12 +45,19 @@ final class Visit {
     /// 場所の経度（MapKit 選択時のみ）
     var locationLongitude: Double?
 
-    /// 訪問先都道府県への逆参照
-    var prefecture: Prefecture?
+    /// 写真リレーション (CloudKit 互換のため optional + default)。
+    /// 新規追加分は `VisitPhotoStore` 経由でこちらに格納される。
+    /// レガシープロパティ (`photoFilename` / `photoFilenames` / `photoThumbnail` /
+    /// `photoThumbnailsData`) は移行完了確認まで保持し、`PhotoMigration` で
+    /// `VisitPhoto` に転記する。表示は `sortedPhotoThumbnails` 等の互換ヘルパー経由。
+    @Relationship(deleteRule: .cascade, inverse: \VisitPhoto.visit)
+    var photos: [VisitPhoto]? = []
 
-    init(prefectureName: String, startDate: Date, endDate: Date? = nil,
+    init(prefectureName: String, prefectureID: Int = 0,
+         startDate: Date, endDate: Date? = nil,
          note: String = "", tag: VisitTag = .none) {
         self.prefectureName = prefectureName
+        self.prefectureID   = prefectureID
         self.startDate      = startDate
         self.endDate        = endDate
         self.note           = note
@@ -101,7 +112,55 @@ final class Visit {
         return []
     }
 
-    var hasPhotos: Bool { !allPhotoFilenames.isEmpty }
+    // MARK: - Photo compatibility helpers (Phase A 移行期間用)
+    //
+    // 新 `photos` リレーションと旧 legacy プロパティが共存する期間に、
+    // 表示・カウントを破綻させないための統合ヘルパー。
+    // `legacyFilename` で重複検出することで、移行済みの写真は新側のみカウント。
+
+    /// 新 `photos` を `orderIndex` 順にソートして返す
+    var sortedPhotos: [VisitPhoto] {
+        guard !isDeleted else { return [] }
+        return (photos ?? []).sorted { $0.orderIndex < $1.orderIndex }
+    }
+
+    /// 写真の合計数 (新旧重複なし)
+    var totalPhotoCount: Int {
+        guard !isDeleted else { return 0 }
+        let newPhotos = sortedPhotos
+        let migratedNames = Set(newPhotos.compactMap(\.legacyFilename))
+        let unmigratedLegacyCount = allPhotoFilenames.filter { !migratedNames.contains($0) }.count
+        return newPhotos.count + unmigratedLegacyCount
+    }
+
+    /// 表示用サムネイル一覧 (新 `photos` 優先、未移行 legacy をフォールバック)
+    var sortedPhotoThumbnails: [Data] {
+        guard !isDeleted else { return [] }
+        let newPhotos = sortedPhotos
+        let migratedNames = Set(newPhotos.compactMap(\.legacyFilename))
+        let newThumbs = newPhotos.compactMap(\.thumbnailData)
+
+        // 未移行 legacy 分のサムネイルを追加 (順序維持)
+        let legacyThumbs = zip(allPhotoFilenames, allPhotoThumbnails)
+            .filter { !migratedNames.contains($0.0) }
+            .map(\.1)
+
+        return newThumbs + legacyThumbs
+    }
+
+    /// フルスクリーン表示用ファイル名一覧 (旧 PhotoStorageManager.loadImage と組み合わせる用途、
+    /// 新 photos の場合は VisitPhoto.id の文字列を識別子として返す)
+    var sortedPhotoFilenames: [String] {
+        guard !isDeleted else { return [] }
+        let newPhotos = sortedPhotos
+        let migratedNames = Set(newPhotos.compactMap(\.legacyFilename))
+        let newIDs = newPhotos.map { $0.id.uuidString }
+
+        let legacyNames = allPhotoFilenames.filter { !migratedNames.contains($0) }
+        return newIDs + legacyNames
+    }
+
+    var hasPhotos: Bool { totalPhotoCount > 0 }
     var hasCompanions: Bool { !companions.isEmpty }
     var hasLocation: Bool {
         guard !isDeleted else { return false }

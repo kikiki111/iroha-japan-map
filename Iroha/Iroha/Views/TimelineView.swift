@@ -14,7 +14,7 @@ struct TimelineView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Visit.startDate, order: .reverse) private var visits: [Visit]
-    @Query(sort: \Prefecture.id) private var prefectures: [Prefecture]
+    private var prefectures: [Prefecture] { Prefecture.all }
 
     @State private var selectedYear: Int = 0
     @State private var showAddVisit = false
@@ -339,7 +339,7 @@ struct TimelineView: View {
             .filter { $0 != .none }
         var globalIndex = 0
         let allThumbnails: [(Data, Int)] = trip.visits.flatMap { v in
-            v.allPhotoThumbnails.map { thumb in
+            v.sortedPhotoThumbnails.map { thumb in
                 defer { globalIndex += 1 }
                 return (thumb, globalIndex)
             }
@@ -473,8 +473,10 @@ struct TimelineView: View {
     // MARK: - Share
 
     private func shareYearRecap() {
-        let visitedNames = Set(filteredVisits.map(\.prefectureName))
-        ShareManager.shareMap(prefectures: prefectures, visitedNames: visitedNames, year: isAllYearsMode ? nil : currentYear)
+        // 年別シェアでは年でフィルタした visits の VisitStats を渡す
+        // (全期間の stats を渡すと年別マップが全期間表示になる)
+        let stats = VisitStats(visits: filteredVisits)
+        ShareManager.shareMap(stats: stats, year: isAllYearsMode ? nil : currentYear)
     }
 }
 
@@ -576,7 +578,8 @@ struct TripDetailSheet: View {
         .presentationBackground(.ultraThinMaterial)
         .fullScreenCover(item: $fullscreenSelection) { selection in
             PhotoFullscreenViewer(
-                filenames: selection.filenames,
+                visit: selection.visit,
+                identifiers: selection.identifiers,
                 thumbnails: selection.thumbnails,
                 initialIndex: selection.initialIndex
             )
@@ -722,10 +725,10 @@ struct TripDetailSheet: View {
                 }
 
                 // Photo thumbnails (Photos-app style 3-column grid)
-                if !visit.allPhotoThumbnails.isEmpty {
+                if !visit.sortedPhotoThumbnails.isEmpty {
                     let columns = Array(repeating: GridItem(.flexible(), spacing: 2), count: 3)
                     LazyVGrid(columns: columns, spacing: 2) {
-                        ForEach(Array(visit.allPhotoThumbnails.enumerated()), id: \.offset) { index, data in
+                        ForEach(Array(visit.sortedPhotoThumbnails.enumerated()), id: \.offset) { index, data in
                             if let uiImage = UIImage(data: data) {
                                 Color.clear
                                     .aspectRatio(1, contentMode: .fit)
@@ -739,8 +742,9 @@ struct TripDetailSheet: View {
                                     .contentShape(Rectangle())
                                     .onTapGesture {
                                         fullscreenSelection = PhotoFullscreenSelection(
-                                            filenames: visit.allPhotoFilenames,
-                                            thumbnails: visit.allPhotoThumbnails,
+                                            visit: visit,
+                                            identifiers: visit.sortedPhotoFilenames,
+                                            thumbnails: visit.sortedPhotoThumbnails,
                                             initialIndex: index
                                         )
                                     }
@@ -788,27 +792,30 @@ struct TripDetailSheet: View {
 
 struct PhotoFullscreenSelection: Identifiable {
     let id = UUID()
-    let filenames: [String]
+    let visit: Visit
+    let identifiers: [String]
     let thumbnails: [Data]
     let initialIndex: Int
 }
 
 struct PhotoFullscreenViewer: View {
-    let filenames: [String]
+    let visit: Visit
+    let identifiers: [String]
     let thumbnails: [Data]
     let initialIndex: Int
 
     @Environment(\.dismiss) private var dismiss
     @State private var currentIndex: Int
 
-    init(filenames: [String], thumbnails: [Data], initialIndex: Int) {
-        self.filenames = filenames
+    init(visit: Visit, identifiers: [String], thumbnails: [Data], initialIndex: Int) {
+        self.visit = visit
+        self.identifiers = identifiers
         self.thumbnails = thumbnails
         self.initialIndex = initialIndex
         self._currentIndex = State(initialValue: initialIndex)
     }
 
-    private var pageCount: Int { max(filenames.count, thumbnails.count) }
+    private var pageCount: Int { max(identifiers.count, thumbnails.count) }
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -847,7 +854,8 @@ struct PhotoFullscreenViewer: View {
     }
 
     private func loadImage(at index: Int) -> UIImage? {
-        if index < filenames.count, let img = PhotoStorageManager.loadImage(filename: filenames[index]) {
+        if index < identifiers.count,
+           let img = VisitPhotoStore.loadFullImage(for: identifiers[index], in: visit) {
             return img
         }
         if index < thumbnails.count, let img = UIImage(data: thumbnails[index]) {
@@ -862,5 +870,5 @@ struct PhotoFullscreenViewer: View {
 #Preview {
     @Previewable @State var vm = MapViewModel()
     TimelineView(mapViewModel: vm)
-        .modelContainer(for: [Prefecture.self, Visit.self], inMemory: true)
+        .modelContainer(for: [Visit.self], inMemory: true)
 }

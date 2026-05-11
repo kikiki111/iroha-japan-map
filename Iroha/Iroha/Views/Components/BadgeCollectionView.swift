@@ -6,26 +6,29 @@
 import SwiftUI
 
 struct BadgeCollectionView: View {
-    let prefectures: [Prefecture]
     let visits: [Visit]
 
     @State private var selectedTier: TravelerTier = .beginner
     @State private var selectedBadge: Badge?
 
+    private var stats: VisitStats { VisitStats(visits: visits) }
+
     private var currentTier: TravelerTier {
-        TravelerTier.currentTier(prefectures: prefectures, visits: visits)
+        TravelerTier.currentTier(visits: visits, stats: stats)
     }
 
     private var totalEarned: Int {
-        Badge.allCases.filter { $0.isEarned(prefectures: prefectures, visits: visits) }.count
+        let s = stats
+        return Badge.allCases.filter { $0.isEarned(visits: visits, stats: s) }.count
     }
 
     private func tierEarnedCount(_ tier: TravelerTier) -> Int {
-        Badge.badges(for: tier).filter { $0.isEarned(prefectures: prefectures, visits: visits) }.count
+        let s = stats
+        return Badge.badges(for: tier).filter { $0.isEarned(visits: visits, stats: s) }.count
     }
 
     private func isTierUnlocked(_ tier: TravelerTier) -> Bool {
-        tier.isUnlocked(prefectures: prefectures, visits: visits)
+        tier.isUnlocked(visits: visits, stats: stats)
     }
 
     var body: some View {
@@ -155,6 +158,7 @@ struct BadgeCollectionView: View {
 
     private func categorySection(_ category: BadgeCategory) -> some View {
         let unlocked = isTierUnlocked(selectedTier)
+        let s = stats
 
         return VStack(alignment: .leading, spacing: 8) {
             Text(category.rawValue)
@@ -166,7 +170,7 @@ struct BadgeCollectionView: View {
             let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
             LazyVGrid(columns: columns, spacing: 10) {
                 ForEach(badges) { badge in
-                    let earned = badge.isEarned(prefectures: prefectures, visits: visits)
+                    let earned = badge.isEarned(visits: visits, stats: s)
                     VStack(spacing: 4) {
                         BadgeStampView(badge: badge, earned: earned && unlocked, locked: !unlocked)
                         Text(earned && unlocked ? badge.displayName : "???")

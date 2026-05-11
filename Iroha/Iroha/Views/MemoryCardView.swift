@@ -66,7 +66,7 @@ struct MemoryCardView: View {
     private func memoryCard(_ memory: MemoryItem) -> some View {
         VStack(spacing: 0) {
             ZStack(alignment: .topLeading) {
-                if let photoData = memory.visit.allPhotoThumbnails.first,
+                if let photoData = memory.visit.sortedPhotoThumbnails.first,
                    let uiImage = UIImage(data: photoData) {
                     Image(uiImage: uiImage)
                         .resizable()

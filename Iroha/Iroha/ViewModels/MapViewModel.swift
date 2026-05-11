@@ -65,14 +65,13 @@ final class MapViewModel {
     // MARK: - Coloring
 
     /// 全47都道府県を訪問済みかどうかを判定する
-    func isAllVisited(prefectures: [Prefecture]) -> Bool {
-        prefectures.count == 47 && prefectures.allSatisfy { $0.isVisited }
+    func isAllVisited(stats: VisitStats) -> Bool {
+        stats.isAllVisited
     }
 
     /// 訪問回数に応じた都道府県の表示色を返す
-    func color(for prefecture: Prefecture, allPrefectures: [Prefecture]) -> Color {
-        if isAllVisited(prefectures: allPrefectures) { return Color(hex: "#534AB7") }
-        return prefecture.visitColor()
+    func color(for prefecture: Prefecture, stats: VisitStats) -> Color {
+        stats.color(for: prefecture)
     }
 
     // MARK: - Milestone Detection
@@ -81,9 +80,9 @@ final class MapViewModel {
     func detectMilestone(
         oldVisitedCount: Int,
         oldRegionCounts: [Region: Int],
-        prefectures: [Prefecture]
+        stats: VisitStats
     ) {
-        let newVisitedCount = visitedPrefectureCount(prefectures: prefectures)
+        let newVisitedCount = stats.visitedCount
 
         // 優先度: national > half > region > first
         if newVisitedCount == 47, !milestoneShown("milestone_47_shown") {
@@ -98,8 +97,8 @@ final class MapViewModel {
             return
         }
 
-        let newRegionCounts = regionVisitedCounts(prefectures: prefectures)
-        let totals = regionTotalCounts(prefectures: prefectures)
+        let newRegionCounts = stats.visitsByRegion()
+        let totals = Self.regionTotalCounts
         for region in Region.allCases {
             let oldCount = oldRegionCounts[region] ?? 0
             let newCount = newRegionCounts[region] ?? 0
@@ -128,7 +127,8 @@ final class MapViewModel {
         }
 
         if newVisitedCount > oldVisitedCount {
-            if let newlyVisited = prefectures.first(where: { $0.visitCount == 1 }) {
+            // 直近で +1 された県を特定 (count == 1 の県)
+            if let newlyVisited = Prefecture.all.first(where: { stats.count(for: $0) == 1 }) {
                 pendingMilestone = .firstVisit(prefectureCode: newlyVisited.id)
             }
         }
@@ -146,67 +146,69 @@ final class MapViewModel {
     }
 
     /// 訪問済み都道府県数
-    func visitedPrefectureCount(prefectures: [Prefecture]) -> Int {
-        prefectures.filter(\.isVisited).count
+    func visitedPrefectureCount(stats: VisitStats) -> Int {
+        stats.visitedCount
     }
 
     /// 全訪問回数の合計
-    func totalVisitCount(prefectures: [Prefecture]) -> Int {
-        prefectures.reduce(0) { $0 + $1.visitCount }
+    func totalVisitCount(stats: VisitStats) -> Int {
+        stats.countsByPrefectureID.values.reduce(0, +)
     }
 
     /// 達成率（0.0〜1.0）
-    func achievementRatio(prefectures: [Prefecture]) -> Double {
-        Double(visitedPrefectureCount(prefectures: prefectures)) / 47.0
+    func achievementRatio(stats: VisitStats) -> Double {
+        Double(stats.visitedCount) / 47.0
     }
 
     /// 8地方それぞれの訪問進捗リスト
-    func regionProgressList(prefectures: [Prefecture]) -> [RegionProgress] {
-        Region.allCases.map { region in
-            let group = prefectures.filter { $0.region == region }
-            return RegionProgress(
+    func regionProgressList(stats: VisitStats) -> [RegionProgress] {
+        let totals = Self.regionTotalCounts
+        let visited = stats.visitsByRegion()
+        return Region.allCases.map { region in
+            RegionProgress(
                 region: region,
-                visited: group.filter(\.isVisited).count,
-                total: group.count
+                visited: visited[region] ?? 0,
+                total: totals[region] ?? 0
             )
         }
     }
 
     /// 地方ごとの訪問済み都道府県数
-    func regionVisitedCounts(prefectures: [Prefecture]) -> [Region: Int] {
+    func regionVisitedCounts(stats: VisitStats) -> [Region: Int] {
         var result: [Region: Int] = [:]
+        let visited = stats.visitsByRegion()
         for region in Region.allCases {
-            result[region] = prefectures.filter { $0.region == region && $0.isVisited }.count
+            result[region] = visited[region] ?? 0
         }
         return result
     }
 
-    /// 地方ごとの都道府県総数
-    func regionTotalCounts(prefectures: [Prefecture]) -> [Region: Int] {
+    /// 地方ごとの都道府県総数（Prefecture.all から事前計算）
+    static let regionTotalCounts: [Region: Int] = {
         var result: [Region: Int] = [:]
         for region in Region.allCases {
-            result[region] = prefectures.filter { $0.region == region }.count
+            result[region] = Prefecture.all.filter { $0.region == region }.count
         }
         return result
-    }
+    }()
 
     // MARK: - Distance
 
-    private func distanceFromTokyo(_ target: Prefecture, prefectures: [Prefecture]) -> Double {
-        guard let tokyo = prefectures.first(where: { $0.id == 13 }) else {
+    private func distanceFromTokyo(_ target: Prefecture) -> Double {
+        guard let tokyo = Prefecture.by(id: 13) else {
             return target.distanceFromTokyo
         }
         return DistanceCalculator.distance(from: tokyo, to: target)
     }
 
-    func totalTravelDistance(visits: [Visit], prefectures: [Prefecture]) -> Int {
-        guard let tokyo = prefectures.first(where: { $0.id == 13 }) else { return 0 }
+    func totalTravelDistance(visits: [Visit]) -> Int {
+        guard let tokyo = Prefecture.by(id: 13) else { return 0 }
         let trips = TripDetector.detect(from: visits)
-        return Int(DistanceCalculator.totalRouteDistance(trips: trips, home: tokyo, prefectures: prefectures))
+        return Int(DistanceCalculator.totalRouteDistance(trips: trips, home: tokyo, prefectures: Prefecture.all))
     }
 
-    func farthestVisitedPrefecture(prefectures: [Prefecture]) -> Prefecture? {
-        prefectures.filter(\.isVisited).max { distanceFromTokyo($0, prefectures: prefectures) < distanceFromTokyo($1, prefectures: prefectures) }
+    func farthestVisitedPrefecture(stats: VisitStats) -> Prefecture? {
+        stats.visitedPrefectures.max { distanceFromTokyo($0) < distanceFromTokyo($1) }
     }
 
     // MARK: - Region Suggestion
@@ -217,8 +219,8 @@ final class MapViewModel {
         let unvisited: [Prefecture]
     }
 
-    func closestRegionSuggestion(prefectures: [Prefecture]) -> RegionSuggestion? {
-        let progressList = regionProgressList(prefectures: prefectures)
+    func closestRegionSuggestion(stats: VisitStats) -> RegionSuggestion? {
+        let progressList = regionProgressList(stats: stats)
 
         let inProgress = progressList
             .filter { $0.visited > 0 && $0.visited < $0.total }
@@ -230,8 +232,8 @@ final class MapViewModel {
             }
 
         guard let closest = inProgress.first else { return nil }
-        let unvisited = prefectures
-            .filter { $0.region == closest.region && !$0.isVisited }
+        let unvisited = Prefecture.all
+            .filter { $0.region == closest.region && !stats.isVisited($0) }
         return RegionSuggestion(
             region: closest.region,
             remaining: closest.total - closest.visited,

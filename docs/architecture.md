@@ -38,20 +38,41 @@ ContentView
   ├── EditVisitSheetView（訪問編集 — TimelineView から）
   └── TripDetailSheet（旅の詳細 — TimelineView から）
 
-## データモデル（SwiftData）
+## データモデル
 
-### Prefecture（永続化）
+永続化層は **SwiftData (Visit + VisitPhoto)** + **静的 struct (Prefecture)** + **派生集計 (VisitStats)** の三層構造。
+
+### Prefecture（静的 struct — SwiftData 外）
 - id: Int（都道府県コード 1〜47）
 - name, nameKana, region, latitude, longitude, distanceFromTokyo
-- visits: [Visit]（@Relationship, cascade delete）
-- computed: isVisited, visitCount, latestVisit
+- `Prefecture.all` の static let 配列で 47 件を保持
+- ヘルパー: `Prefecture.by(id:)` / `Prefecture.by(name:)`
+- 訪問状態 (isVisited, visitCount) は持たず、`VisitStats` で動的算出
+- CloudKit 同期対象から外すことで、複数端末での seed 重複・unique 制約問題を回避
 
-### Visit（永続化）
-- prefectureName, startDate, endDate, note
+### Visit（SwiftData @Model — CloudKit 同期対象 / Phase 6 で有効化）
+- prefectureName, prefectureID（Prefecture.id への参照キー）
+- startDate, endDate, note
 - tag: VisitTag?（日帰り / 宿泊 / 居住）
 - mood: VisitMood?（楽 / 癒 / 感 / 驚 / 懐 / 静）
-- photoFilenames, photoThumbnails（複数写真対応）
-- prefecture: Prefecture?（逆参照）
+- transports, tripName, companions, location, locationLatitude, locationLongitude
+- photos: [VisitPhoto]?（@Relationship, cascade delete, optional 必須）
+- 旧 photoFilenames / photoThumbnails / photoFilename / photoThumbnail（PhotoMigration 完了確認まで併存）
+- 互換ヘルパー: totalPhotoCount, sortedPhotoThumbnails, sortedPhotoFilenames, sortedPhotos
+
+### VisitPhoto（SwiftData @Model — CloudKit 同期対象 / Phase 6 で有効化）
+- id: UUID
+- imageData: Data?（@Attribute(.externalStorage) — CloudKit Asset として同期）
+- thumbnailData: Data?（300px、通常フィールド）
+- orderIndex, createdAt
+- legacyFilename: String?（旧 Documents/Photos/ ファイル名 — 移行元の重複検出キー）
+- visit: Visit?（optional 必須）
+- 保存時に **必ず** 最大 2048px / 5MB に強制縮小（VisitPhotoStore）
+
+### VisitStats（派生集計 ヘルパー）
+- visits 群を引数に取り、prefectureID → count の辞書を生成
+- API: count(for:), isVisited(_:), isAllVisited, visitedPrefectures, visitsByRegion(), isRegionConquered(_:), color(for:), colorHex(for:), signature
+- View 階層で 1 度作ってサブビューに渡す
 
 ### Trip（非永続化 — TripDetector で動的生成）
 - visits: [Visit]
@@ -93,6 +114,17 @@ Prefecture（SwiftData）←→ MapViewModel → JapanMapView（WKWebView）
 
 ## サービス層
 - TripDetector — 旅行グループ自動検出（3日ルール）
-- PhotoStorageManager — 写真保存・読込・削除・サムネイル生成（Documents/Photos/）
+- VisitPhotoStore — 写真の保存・取得・削除（VisitPhoto 経由、2048px/5MB に強制縮小、新旧ハイブリッドロード）
+- PhotoStorageManager — 旧 Documents/Photos/ への読み書き（Phase A 移行期間中に PhotoMigration / 互換ヘルパーから利用、Phase B 完了で削除予定）
+- VisitPrefectureMigration — 既存 Visit の prefectureID を prefectureName から backfill（起動時 1 回、scan ベース判定で冪等）
+- PhotoMigration — 既存 Documents/Photos/ ファイルを VisitPhoto に転記（写真単位冪等、旧データは Phase B まで保持）
+- CloudSyncStatusObserver — CloudKit 同期状態の集約・公開（CKAccountStatus + NWPathMonitor + UserDefaults）
 - MemoryNotificationManager — 「今日の記憶」通知スケジュール（UNCalendarNotificationTrigger）
-- ShareManager — 訪問マップ画像シェア（ImageRenderer + UIActivityViewController）
+- ShareManager — 訪問マップ画像シェア（VisitStats を引数に取り、年別シェア時は filteredVisits 由来の stats を渡す）
+
+## CloudKit 同期（Phase 6 で有効化予定）
+- ModelContainer の `cloudKitDatabase: .private("iCloud.com.qumo.Iroha")` で有効化
+- Schema は [Visit.self, VisitPhoto.self]（Prefecture は static struct、同期対象外）
+- ユーザの ON/OFF 設定: UserDefaults `cloud_sync_enabled`
+- 初回起動時: CloudSyncOnboardingView で選択
+- ON/OFF 切替は ModelContainer の起動時固定のため、変更後はアプリ再起動を要求

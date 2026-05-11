@@ -737,6 +737,13 @@ struct VisitFormView: View {
             Spacer()
             Button {
                 pickerRefreshId += 1
+                // 日付タップ時と同じ進行を提供:
+                // 開始日 picker → 帰着日 picker、帰着日 picker → セクション閉じる
+                if activeDateField == .start {
+                    activeDateField = .end
+                } else {
+                    expandedSection = nil
+                }
             } label: {
                 Text("完了")
                     .font(.system(size: 14, weight: .medium))
@@ -1004,10 +1011,11 @@ struct VisitFormView: View {
             location = visit.location
             locationLatitude = visit.locationLatitude
             locationLongitude = visit.locationLongitude
-            for filename in visit.allPhotoFilenames {
-                if let image = PhotoStorageManager.loadImage(filename: filename) {
+            // 識別子は新写真なら VisitPhoto.id.uuidString、未移行 legacy なら filename
+            for identifier in visit.sortedPhotoFilenames {
+                if let image = VisitPhotoStore.loadFullImage(for: identifier, in: visit) {
                     photoImages.append(image)
-                    photoFilenameMap.append(filename)
+                    photoFilenameMap.append(identifier)
                 }
             }
         } else if let pref = prefecture {
@@ -1055,27 +1063,14 @@ struct VisitFormView: View {
         let computedEndDate: Date? = {
             Calendar.current.isDate(endDate, inSameDayAs: visitDate) ? nil : endDate
         }()
+        let resolvedPrefectureID = Prefecture.by(name: selectedPrefectureName)?.id ?? 0
 
-        var newFilenames: [String] = []
-        var newThumbnails: [Data] = []
-        var createdFilenames: [String] = []
-        for (i, image) in photoImages.enumerated() {
-            if i < photoFilenameMap.count, let existing = photoFilenameMap[i] {
-                newFilenames.append(existing)
-                if let thumb = PhotoStorageManager.generateThumbnail(from: image) {
-                    newThumbnails.append(thumb)
-                }
-            } else if let filename = PhotoStorageManager.save(image: image) {
-                newFilenames.append(filename)
-                if let thumb = PhotoStorageManager.generateThumbnail(from: image) {
-                    newThumbnails.append(thumb)
-                }
-                createdFilenames.append(filename)
-            }
-        }
-
-        if let visit = editingVisit {
+        // メタデータ更新 (Visit を確保)
+        let visit: Visit
+        if let existing = editingVisit {
+            visit = existing
             visit.prefectureName = selectedPrefectureName
+            visit.prefectureID = resolvedPrefectureID
             visit.startDate = visitDate
             visit.endDate = computedEndDate
             visit.tag = selectedTag
@@ -1087,42 +1082,73 @@ struct VisitFormView: View {
             visit.location = location
             visit.locationLatitude = locationLatitude
             visit.locationLongitude = locationLongitude
-            visit.prefecture = prefectures.first { $0.name == selectedPrefectureName }
-            visit.photoFilename = nil
-            visit.photoThumbnail = nil
-            visit.photoFilenames = newFilenames
-            visit.photoThumbnails = newThumbnails
         } else {
-            let visit = Visit(
+            let newVisit = Visit(
                 prefectureName: selectedPrefectureName,
+                prefectureID: resolvedPrefectureID,
                 startDate: visitDate,
                 endDate: computedEndDate,
                 note: memo,
                 tag: selectedTag
             )
-            visit.mood = selectedMood
-            visit.transports = selectedTransports.map(\.rawValue)
-            visit.tripName = tripName
-            visit.companions = companions
-            visit.location = location
-            visit.locationLatitude = locationLatitude
-            visit.locationLongitude = locationLongitude
-            visit.photoFilenames = newFilenames
-            visit.photoThumbnails = newThumbnails
-            visit.prefecture = prefectures.first { $0.name == selectedPrefectureName }
-            modelContext.insert(visit)
+            newVisit.mood = selectedMood
+            newVisit.transports = selectedTransports.map(\.rawValue)
+            newVisit.tripName = tripName
+            newVisit.companions = companions
+            newVisit.location = location
+            newVisit.locationLatitude = locationLatitude
+            newVisit.locationLongitude = locationLongitude
+            modelContext.insert(newVisit)
+            visit = newVisit
+        }
+
+        // 削除処理: 識別子の種類で振り分け
+        var legacyFilenamesToDeleteFromDisk: [String] = []
+        for identifier in Set(removedFilenames) {
+            if let uuid = UUID(uuidString: identifier),
+               let photo = visit.photos?.first(where: { $0.id == uuid }) {
+                modelContext.delete(photo)
+            } else {
+                // legacy filename: photoFilenames / photoThumbnails 配列を同インデックスで削除
+                if let idx = visit.photoFilenames.firstIndex(of: identifier) {
+                    visit.photoFilenames.remove(at: idx)
+                    var thumbs = visit.photoThumbnails
+                    if idx < thumbs.count {
+                        thumbs.remove(at: idx)
+                        visit.photoThumbnails = thumbs
+                    }
+                }
+                if visit.photoFilename == identifier {
+                    visit.photoFilename = nil
+                    visit.photoThumbnail = nil
+                }
+                legacyFilenamesToDeleteFromDisk.append(identifier)
+            }
+        }
+
+        // 新規追加処理: photoFilenameMap[i] == nil のものを VisitPhoto として追加
+        var addedPhotos: [VisitPhoto] = []
+        for (i, image) in photoImages.enumerated() {
+            if i < photoFilenameMap.count, photoFilenameMap[i] != nil {
+                continue
+            }
+            if let photo = VisitPhotoStore.append(image: image, to: visit, in: modelContext) {
+                addedPhotos.append(photo)
+            }
         }
 
         do {
             try modelContext.save()
-            for filename in Set(removedFilenames) {
+            for filename in legacyFilenamesToDeleteFromDisk {
                 PhotoStorageManager.delete(filename: filename)
             }
             dismiss()
         } catch {
-            for filename in createdFilenames {
-                PhotoStorageManager.delete(filename: filename)
+            // ロールバック: 追加した VisitPhoto を削除
+            for photo in addedPhotos {
+                modelContext.delete(photo)
             }
+            try? modelContext.save()
             saveErrorMessage = error.localizedDescription
             showSaveError = true
         }

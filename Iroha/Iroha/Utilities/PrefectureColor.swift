@@ -77,22 +77,6 @@ extension Color {
     }
 }
 
-// MARK: - Prefecture color
-
-extension Prefecture {
-    /// visitCount に応じた塗りつぶし色を返す
-    func visitColor() -> Color {
-        Color(hex: visitColorHex())
-    }
-
-    /// WebView へ渡す用の Hex 文字列
-    func visitColorHex() -> String {
-        switch visitCount {
-        case 0:    return "#DDDAD4"
-        case 1:    return "#C8C4F0"
-        case 2:    return "#9F97DD"
-        case 3, 4: return "#7F77DD"
-        default:   return "#534AB7"
-        }
-    }
-}
+// 都道府県の色判定は `VisitStats` の extension に移植済み (Utilities/VisitStats.swift)。
+// Prefecture は static struct となり、訪問状態を保持しないため、
+// `stats.colorHex(for: prefecture)` / `stats.color(for: prefecture)` を使用すること。

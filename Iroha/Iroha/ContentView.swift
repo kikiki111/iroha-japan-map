@@ -10,7 +10,9 @@ import SwiftData
 
 struct ContentView: View {
     @State private var mapViewModel = MapViewModel()
+    @State private var cloudSyncStatus = CloudSyncStatusObserver()
     @AppStorage("onboarding_done") private var onboardingDone = false
+    @AppStorage("cloud_sync_onboarding_done") private var cloudSyncOnboardingDone = false
     @AppStorage("appearance_mode") private var appearanceMode: Int = 0
 
     private var colorScheme: ColorScheme? {
@@ -46,7 +48,17 @@ struct ContentView: View {
                     .transition(.opacity)
             }
         }
+        .environment(cloudSyncStatus)
         .preferredColorScheme(colorScheme)
+        .sheet(isPresented: Binding(
+            get: { onboardingDone && !cloudSyncOnboardingDone },
+            set: { _ in }
+        )) {
+            CloudSyncOnboardingView()
+        }
+        .task {
+            await cloudSyncStatus.refreshAccountStatus()
+        }
     }
 }
 
@@ -56,7 +68,6 @@ struct ContentView: View {
 private struct MapTabView: View {
     @Bindable var mapViewModel: MapViewModel
 
-    @Query(sort: \Prefecture.id) private var prefectures: [Prefecture]
     @Query(sort: \Visit.startDate, order: .reverse) private var visits: [Visit]
 
     @State private var previousVisitedCount: Int = 0
@@ -64,6 +75,8 @@ private struct MapTabView: View {
     @State private var previousRegionCounts: [Region: Int] = [:]
     @State private var suggestionDismissedRegion: Region?
     @State private var sakuraIntensity: SakuraEffectView.Intensity?
+
+    private var stats: VisitStats { VisitStats(visits: visits) }
 
     var body: some View {
         NavigationStack {
@@ -76,7 +89,7 @@ private struct MapTabView: View {
 
                     regionSuggestionView
 
-                    IrohaStatsBar(prefectures: prefectures, mapViewModel: mapViewModel)
+                    IrohaStatsBar(mapViewModel: mapViewModel)
                 }
             }
             .background(Color.irohaWashi)
@@ -113,7 +126,7 @@ private struct MapTabView: View {
             .sheet(isPresented: $showBadgeCollection) {
                 NavigationStack {
                     ScrollView {
-                        BadgeCollectionView(prefectures: prefectures, visits: Array(visits))
+                        BadgeCollectionView(visits: Array(visits))
                             .padding(.bottom, 20)
                     }
                     .background(Color.irohaWashi)
@@ -149,19 +162,20 @@ private struct MapTabView: View {
                     .environment(\.locale, Locale(identifier: "ja_JP"))
             }
             .onAppear {
-                previousVisitedCount = mapViewModel.visitedPrefectureCount(prefectures: prefectures)
-                previousRegionCounts = mapViewModel.regionVisitedCounts(prefectures: prefectures)
+                let s = stats
+                previousVisitedCount = s.visitedCount
+                previousRegionCounts = mapViewModel.regionVisitedCounts(stats: s)
             }
-            .onChange(of: prefectures.map(\.visitCount)) { oldCounts, newCounts in
-                guard oldCounts != newCounts else { return }
+            .onChange(of: stats.signature) { _, _ in
+                let s = stats
                 let oldVisitedCount = previousVisitedCount
                 let oldRegionCounts = previousRegionCounts
-                previousVisitedCount = mapViewModel.visitedPrefectureCount(prefectures: prefectures)
-                previousRegionCounts = mapViewModel.regionVisitedCounts(prefectures: prefectures)
+                previousVisitedCount = s.visitedCount
+                previousRegionCounts = mapViewModel.regionVisitedCounts(stats: s)
                 mapViewModel.detectMilestone(
                     oldVisitedCount: oldVisitedCount,
                     oldRegionCounts: oldRegionCounts,
-                    prefectures: prefectures
+                    stats: s
                 )
             }
             .onChange(of: mapViewModel.pendingMilestone) { _, milestone in
@@ -256,7 +270,7 @@ private struct MapTabView: View {
 
     @ViewBuilder
     private var regionSuggestionView: some View {
-        if let suggestion = mapViewModel.closestRegionSuggestion(prefectures: prefectures),
+        if let suggestion = mapViewModel.closestRegionSuggestion(stats: stats),
            suggestionDismissedRegion != suggestion.region {
             VStack(spacing: 4) {
                 HStack(spacing: 0) {
@@ -346,5 +360,5 @@ private struct MapTabView: View {
 
 #Preview {
     ContentView()
-        .modelContainer(for: [Prefecture.self, Visit.self], inMemory: true)
+        .modelContainer(for: [Visit.self], inMemory: true)
 }
