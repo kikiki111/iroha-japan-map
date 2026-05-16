@@ -18,6 +18,7 @@ struct PrefectureDetailSheet: View {
 
     @State private var showAddVisit = false
     @State private var editingVisit: Visit?
+    @State private var selectedTrip: Trip?
     @State private var showDeleteConfirmation = false
     @State private var visitToDelete: Visit?
     @State private var browserSelection: PhotoFullscreenSelection?
@@ -54,6 +55,16 @@ struct PrefectureDetailSheet: View {
             .sheet(item: $editingVisit) { visit in
                 VisitFormView(prefectures: Prefecture.all, prefecture: prefecture, editingVisit: visit)
                     .environment(\.locale, Locale(identifier: "ja_JP"))
+            }
+            .sheet(item: $selectedTrip) { trip in
+                TripDetailSheet(trip: trip, prefectures: Prefecture.all) { visit in
+                    selectedTrip = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        editingVisit = visit
+                    }
+                }
+                .presentationDetents([.large])
+                .environment(\.locale, Locale(identifier: "ja_JP"))
             }
             .alert("旅行記録を削除しますか？", isPresented: $showDeleteConfirmation) {
                 Button("キャンセル", role: .cancel) {}
@@ -412,7 +423,7 @@ struct PrefectureDetailSheet: View {
         .padding(.vertical, 8)
         .contentShape(Rectangle())
         .onTapGesture {
-            editingVisit = visit
+            openTripDetail(for: visit)
         }
         .contextMenu {
             Button {
@@ -426,6 +437,15 @@ struct PrefectureDetailSheet: View {
             } label: {
                 Label("削除", systemImage: "trash")
             }
+        }
+    }
+
+    private func openTripDetail(for visit: Visit) {
+        let allTrips = TripDetector.detect(from: Array(allVisits))
+        if let trip = allTrips.first(where: { $0.visits.contains { $0.id == visit.id } }) {
+            selectedTrip = trip
+        } else {
+            editingVisit = visit
         }
     }
 
