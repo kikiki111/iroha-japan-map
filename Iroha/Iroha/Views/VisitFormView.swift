@@ -817,7 +817,7 @@ struct VisitFormView: View {
                             .font(.system(size: 10))
                             .foregroundColor(isSelected ? transport.foregroundColor : .irohaSumi3)
                     }
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, minHeight: 40)
                     .padding(.vertical, 8)
                     .background(isSelected ? transport.backgroundColor : Color.irohaWashi2)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
