@@ -41,8 +41,7 @@ struct PrefectureDetailSheet: View {
                 VStack(spacing: 0) {
                     headerSection
                     photoGallery
-                    quickRecordButton
-                    addDetailButton
+                    recordButtonsRow
                     visitList
                 }
             }
@@ -194,92 +193,98 @@ struct PrefectureDetailSheet: View {
         }
     }
 
-    // MARK: - Quick record button
+    // MARK: - Record buttons
 
     private var todayVisit: Visit? {
         let calendar = Calendar.current
         return sortedVisits.first { calendar.isDateInToday($0.startDate) }
     }
 
-    private var quickRecordButton: some View {
-        Group {
-            if let existing = todayVisit {
-                Button {
-                    editingVisit = existing
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "pencil.circle.fill")
-                            .font(.system(size: 16))
-                            .foregroundColor(.white)
-                        Text("今日の記録を編集")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundColor(.white)
-                        Spacer()
-                        Text(Date().formatted(.dateTime.month().day().locale(Locale(identifier: "ja_JP"))))
-                            .font(.system(size: 11))
-                            .foregroundColor(.white.opacity(0.7))
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Color.irohaFuji.opacity(0.7))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-            } else {
-                Button {
-                    let visit = Visit(
-                        prefectureName: prefecture.name,
-                        prefectureID: prefecture.id,
-                        startDate: Date()
-                    )
-                    modelContext.insert(visit)
-                    try? modelContext.save()
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 16))
-                            .foregroundColor(.white)
-                        Text("今日の旅行を記録")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundColor(.white)
-                        Spacer()
-                        Text(Date().formatted(.dateTime.month().day().locale(Locale(identifier: "ja_JP"))))
-                            .font(.system(size: 11))
-                            .foregroundColor(.white.opacity(0.7))
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Color.irohaFuji)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-            }
+    private var recordButtonsRow: some View {
+        HStack(spacing: 8) {
+            todayRecordButton
+            otherDayRecordButton
         }
         .padding(.horizontal, 20)
         .padding(.top, 10)
     }
 
-    // MARK: - Add detail button
-
-    private var addDetailButton: some View {
-        HStack {
-            Spacer()
+    @ViewBuilder
+    private var todayRecordButton: some View {
+        if let existing = todayVisit {
             Button {
-                showAddVisit = true
+                editingVisit = existing
             } label: {
-                Text("＋ 詳細で追加")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(.irohaFujiDk)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 5)
-                    .background(Color.irohaFujiLt.opacity(0.25))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 20)
-                            .stroke(Color.irohaFujiLt, lineWidth: 0.5)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                recordButtonLabel(
+                    icon: "pencil.circle.fill",
+                    title: "今日の記録を編集",
+                    foreground: .white,
+                    background: Color.irohaFuji.opacity(0.7),
+                    strokeColor: nil
+                )
+            }
+        } else {
+            Button {
+                let visit = Visit(
+                    prefectureName: prefecture.name,
+                    prefectureID: prefecture.id,
+                    startDate: Date()
+                )
+                modelContext.insert(visit)
+                try? modelContext.save()
+            } label: {
+                recordButtonLabel(
+                    icon: "plus.circle.fill",
+                    title: "今日を記録",
+                    foreground: .white,
+                    background: Color.irohaFuji,
+                    strokeColor: nil
+                )
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 6)
+    }
+
+    private var otherDayRecordButton: some View {
+        Button {
+            showAddVisit = true
+        } label: {
+            recordButtonLabel(
+                icon: "calendar.badge.plus",
+                title: "他の日を記録",
+                foreground: .irohaFujiDk,
+                background: Color.irohaFujiLt.opacity(0.25),
+                strokeColor: Color.irohaFujiLt
+            )
+        }
+    }
+
+    private func recordButtonLabel(
+        icon: String,
+        title: String,
+        foreground: Color,
+        background: Color,
+        strokeColor: Color?
+    ) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 14))
+                .foregroundColor(foreground)
+            Text(title)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(foreground)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+        }
+        .frame(maxWidth: .infinity, minHeight: 22)
+        .padding(.vertical, 10)
+        .background(background)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            if let strokeColor {
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(strokeColor, lineWidth: 1)
+            }
+        }
     }
 
     // MARK: - Visit list
