@@ -20,7 +20,8 @@ struct PrefectureDetailSheet: View {
     @State private var editingVisit: Visit?
     @State private var showDeleteConfirmation = false
     @State private var visitToDelete: Visit?
-    @State private var fullScreenPhoto: UIImage?
+    @State private var browserSelection: PhotoFullscreenSelection?
+    @State private var browserIndex: Int = 0
     @State private var showPhotoLoadError = false
 
     private var sortedVisits: [Visit] {
@@ -77,37 +78,61 @@ struct PrefectureDetailSheet: View {
             }
         }
         .overlay {
-            if let photo = fullScreenPhoto {
-                ZStack {
+            if let selection = browserSelection {
+                let pageCount = max(selection.identifiers.count, selection.thumbnails.count)
+                ZStack(alignment: .topTrailing) {
                     Color.black.ignoresSafeArea()
-                    Image(uiImage: photo)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    VStack {
-                        HStack {
-                            Spacer()
-                            Button {
-                                withAnimation(.easeOut(duration: 0.2)) { fullScreenPhoto = nil }
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 28))
-                                    .foregroundStyle(.white, .white.opacity(0.3))
-                            }
-                            .padding(16)
-                            .accessibilityLabel("写真を閉じる")
+
+                    TabView(selection: $browserIndex) {
+                        ForEach(0..<pageCount, id: \.self) { i in
+                            browserPhotoView(selection: selection, at: i)
+                                .tag(i)
                         }
-                        Spacer()
                     }
-                }
-                .onTapGesture {
-                    withAnimation(.easeOut(duration: 0.2)) { fullScreenPhoto = nil }
+                    .tabViewStyle(.page(indexDisplayMode: pageCount > 1 ? .always : .never))
+
+                    Button {
+                        withAnimation(.easeOut(duration: 0.2)) { browserSelection = nil }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 30))
+                            .foregroundStyle(Color.white, Color.black.opacity(0.45))
+                            .padding(.trailing, 16)
+                            .padding(.top, 12)
+                    }
+                    .accessibilityLabel("写真を閉じる")
                 }
                 .transition(.opacity)
             }
         }
-        .animation(.easeOut(duration: 0.2), value: fullScreenPhoto != nil)
-        .interactiveDismissDisabled(fullScreenPhoto != nil)
+        .animation(.easeOut(duration: 0.2), value: browserSelection != nil)
+        .interactiveDismissDisabled(browserSelection != nil)
+    }
+
+    @ViewBuilder
+    private func browserPhotoView(selection: PhotoFullscreenSelection, at index: Int) -> some View {
+        let pageCount = max(selection.identifiers.count, selection.thumbnails.count)
+        VStack(spacing: 0) {
+            Color.clear.frame(height: 30)
+            Group {
+                if index < selection.identifiers.count,
+                   let img = VisitPhotoStore.loadFullImage(for: selection.identifiers[index], in: selection.visit) {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFit()
+                } else if index < selection.thumbnails.count,
+                          let img = UIImage(data: selection.thumbnails[index]) {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFit()
+                } else {
+                    Color.black
+                }
+            }
+            if pageCount > 1 {
+                Color.clear.frame(height: 30)
+            }
+        }
     }
 
     // MARK: - Header
@@ -362,9 +387,7 @@ struct PrefectureDetailSheet: View {
             if let thumbnailData = visit.sortedPhotoThumbnails.first,
                let uiImage = UIImage(data: thumbnailData) {
                 Button {
-                    if let identifier = visit.sortedPhotoFilenames.first {
-                        openPhoto(identifier: identifier, in: visit)
-                    }
+                    openVisitPhotos(visit)
                 } label: {
                     ZStack {
                         Image(uiImage: uiImage)
@@ -413,11 +436,33 @@ struct PrefectureDetailSheet: View {
     }
 
     private func openPhoto(identifier: String, in visit: Visit) {
-        if let image = VisitPhotoStore.loadFullImage(for: identifier, in: visit) {
-            fullScreenPhoto = image
-        } else {
+        let identifiers = visit.sortedPhotoFilenames
+        guard let initialIndex = identifiers.firstIndex(of: identifier) else {
             showPhotoLoadError = true
+            return
         }
+        browserIndex = initialIndex
+        browserSelection = PhotoFullscreenSelection(
+            visit: visit,
+            identifiers: identifiers,
+            thumbnails: visit.sortedPhotoThumbnails,
+            initialIndex: initialIndex
+        )
+    }
+
+    private func openVisitPhotos(_ visit: Visit) {
+        let identifiers = visit.sortedPhotoFilenames
+        guard !identifiers.isEmpty else {
+            showPhotoLoadError = true
+            return
+        }
+        browserIndex = 0
+        browserSelection = PhotoFullscreenSelection(
+            visit: visit,
+            identifiers: identifiers,
+            thumbnails: visit.sortedPhotoThumbnails,
+            initialIndex: 0
+        )
     }
 }
 
