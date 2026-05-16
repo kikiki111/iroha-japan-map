@@ -20,6 +20,10 @@ struct TimelineView: View {
     @State private var showAddVisit = false
     @State private var editingVisit: Visit?
     @State private var selectedTrip: Trip?
+    @State private var filterTag: VisitTag? = nil
+    @State private var filterMood: VisitMood? = nil
+    @State private var filterTransports: Set<VisitTransport> = []
+    @State private var filterCompanions: Set<String> = []
 
     private var isAllYearsMode: Bool { selectedYear == -1 }
 
@@ -38,6 +42,32 @@ struct TimelineView: View {
         if isAllYearsMode { return Array(visits) }
         let calendar = Calendar.current
         return visits.filter { calendar.component(.year, from: $0.startDate) == currentYear }
+    }
+
+    private var allCompanionNames: [String] {
+        Array(Set(visits.flatMap(\.companions))).sorted()
+    }
+
+    private var hasActiveFilter: Bool {
+        filterTag != nil || filterMood != nil || !filterTransports.isEmpty || !filterCompanions.isEmpty
+    }
+
+    private func applyTripFilters(_ trips: [Trip]) -> [Trip] {
+        trips.filter { trip in
+            if let tag = filterTag,
+               !trip.visits.contains(where: { $0.effectiveTag == tag }) { return false }
+            if let mood = filterMood,
+               !trip.visits.contains(where: { $0.effectiveMood == mood }) { return false }
+            if !filterTransports.isEmpty {
+                let tripTransports = Set(trip.visits.flatMap(\.effectiveTransports))
+                if filterTransports.isDisjoint(with: tripTransports) { return false }
+            }
+            if !filterCompanions.isEmpty {
+                let tripCompanions = Set(trip.visits.flatMap(\.companions))
+                if filterCompanions.isDisjoint(with: tripCompanions) { return false }
+            }
+            return true
+        }
     }
 
     var body: some View {
@@ -98,6 +128,7 @@ struct TimelineView: View {
                     }
                 }
                 yearSwitcher
+                filterRow
                 yearHeader
                 monthlyTripCards
             }
@@ -148,6 +179,158 @@ struct TimelineView: View {
             }
         }
         .border(width: 0.5, edges: [.bottom], color: Color.irohaSumi.opacity(0.07))
+    }
+
+    // MARK: - Filter row
+
+    private var filterRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                tagFilterChip
+                moodFilterChip
+                transportFilterChip
+                companionFilterChip
+                if hasActiveFilter {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            filterTag = nil
+                            filterMood = nil
+                            filterTransports.removeAll()
+                            filterCompanions.removeAll()
+                        }
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 11))
+                            Text("クリア")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .foregroundColor(.irohaSumi2)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(Color.irohaWashi2)
+                        .clipShape(Capsule())
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+        }
+        .border(width: 0.5, edges: [.bottom], color: Color.irohaSumi.opacity(0.07))
+    }
+
+    private var tagFilterChip: some View {
+        Menu {
+            Button("すべて") { filterTag = nil }
+            ForEach(VisitTag.selectableCases, id: \.rawValue) { tag in
+                Button {
+                    filterTag = tag
+                } label: {
+                    Label(tag.displayName, systemImage: tag.iconName)
+                }
+            }
+        } label: {
+            filterChipLabel(
+                label: "スタイル",
+                value: filterTag?.displayName,
+                isActive: filterTag != nil
+            )
+        }
+    }
+
+    private var moodFilterChip: some View {
+        Menu {
+            Button("すべて") { filterMood = nil }
+            ForEach(VisitMood.selectable, id: \.rawValue) { mood in
+                Button("\(mood.displayName) \(mood.label)") { filterMood = mood }
+            }
+        } label: {
+            filterChipLabel(
+                label: "ムード",
+                value: filterMood.map { "\($0.displayName) \($0.label)" },
+                isActive: filterMood != nil
+            )
+        }
+    }
+
+    private var transportFilterChip: some View {
+        Menu {
+            Button("すべて") { filterTransports.removeAll() }
+            ForEach(VisitTransport.selectable, id: \.rawValue) { transport in
+                Button {
+                    if filterTransports.contains(transport) {
+                        filterTransports.remove(transport)
+                    } else {
+                        filterTransports.insert(transport)
+                    }
+                } label: {
+                    if filterTransports.contains(transport) {
+                        Label(transport.displayName, systemImage: "checkmark")
+                    } else {
+                        Label(transport.displayName, systemImage: transport.iconName)
+                    }
+                }
+            }
+        } label: {
+            let value: String? = {
+                if filterTransports.isEmpty { return nil }
+                if filterTransports.count == 1 { return filterTransports.first?.displayName }
+                return "\(filterTransports.count)種"
+            }()
+            filterChipLabel(
+                label: "移動手段",
+                value: value,
+                isActive: !filterTransports.isEmpty
+            )
+        }
+    }
+
+    private var companionFilterChip: some View {
+        Menu {
+            Button("すべて") { filterCompanions.removeAll() }
+            ForEach(allCompanionNames, id: \.self) { name in
+                Button {
+                    if filterCompanions.contains(name) {
+                        filterCompanions.remove(name)
+                    } else {
+                        filterCompanions.insert(name)
+                    }
+                } label: {
+                    if filterCompanions.contains(name) {
+                        Label(name, systemImage: "checkmark")
+                    } else {
+                        Text(name)
+                    }
+                }
+            }
+        } label: {
+            let value: String? = {
+                if filterCompanions.isEmpty { return nil }
+                if filterCompanions.count == 1 { return filterCompanions.first }
+                return "\(filterCompanions.count)名"
+            }()
+            filterChipLabel(
+                label: "同行者",
+                value: value,
+                isActive: !filterCompanions.isEmpty
+            )
+        }
+        .disabled(allCompanionNames.isEmpty)
+    }
+
+    private func filterChipLabel(label: String, value: String?, isActive: Bool) -> some View {
+        HStack(spacing: 4) {
+            Text(value ?? label)
+                .font(.system(size: 13, weight: isActive ? .bold : .semibold))
+                .foregroundColor(isActive ? .white : .irohaSumi2)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundColor(isActive ? .white.opacity(0.8) : .irohaSumi3)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 5)
+        .background(isActive ? Color.irohaFujiDk : Color.irohaWashi2)
+        .clipShape(Capsule())
     }
 
     // MARK: - Year header
@@ -201,30 +384,56 @@ struct TimelineView: View {
 
     // MARK: - Timeline
 
+    @ViewBuilder
     private var monthlyTripCards: some View {
         let calendar = Calendar.current
-        let allTrips = TripDetector.detect(from: filteredVisits)
-            .sorted { $0.startDate > $1.startDate }
+        let allTrips = applyTripFilters(
+            TripDetector.detect(from: filteredVisits)
+                .sorted { $0.startDate > $1.startDate }
+        )
 
-        let items = buildTimelineItems(trips: allTrips, calendar: calendar)
-
-        return VStack(spacing: 0) {
-            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-                switch item {
-                case .yearHeader(let year):
-                    timelineYearHeader(year: year)
-                case .monthHeader(let month):
-                    timelineMonthHeader(month: month)
-                case .trip(let trip, let isLast):
-                    timelineTripRow(trip: trip, isLast: isLast)
-                    let nextIsSectionHeader = index + 1 < items.count && items[index + 1].isSectionHeader
-                    if !isLast && !nextIsSectionHeader {
-                        Divider()
-                            .padding(.leading, 42)
+        if allTrips.isEmpty && hasActiveFilter {
+            filteredEmptyState
+        } else {
+            let items = buildTimelineItems(trips: allTrips, calendar: calendar)
+            VStack(spacing: 0) {
+                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                    switch item {
+                    case .yearHeader(let year):
+                        timelineYearHeader(year: year)
+                    case .monthHeader(let month):
+                        timelineMonthHeader(month: month)
+                    case .trip(let trip, let isLast):
+                        timelineTripRow(trip: trip, isLast: isLast)
+                        let nextIsSectionHeader = index + 1 < items.count && items[index + 1].isSectionHeader
+                        if !isLast && !nextIsSectionHeader {
+                            Divider()
+                                .padding(.leading, 42)
+                        }
                     }
                 }
             }
         }
+    }
+
+    private var filteredEmptyState: some View {
+        VStack(spacing: 8) {
+            Text("条件に合う旅行がありません")
+                .font(.system(size: 14))
+                .foregroundColor(.irohaSumi3)
+            Button("条件をクリア") {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    filterTag = nil
+                    filterMood = nil
+                    filterTransports.removeAll()
+                    filterCompanions.removeAll()
+                }
+            }
+            .font(.system(size: 13, weight: .bold))
+            .foregroundColor(.irohaFujiDk)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
     }
 
     private enum TimelineItem {
