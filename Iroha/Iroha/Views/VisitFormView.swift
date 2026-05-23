@@ -35,6 +35,7 @@ struct VisitFormView: View {
     @State private var showDeleteConfirmation = false
     @State private var showSaveError = false
     @State private var saveErrorMessage = ""
+    @State private var isSaving = false
     @State private var isSelectingFromSuggestion = false
     @State private var didPopulate = false
     @FocusState private var locationFieldFocused: Bool
@@ -95,12 +96,17 @@ struct VisitFormView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("キャンセル") { dismiss() }
+                        .disabled(isSaving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { save() }
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(.irohaFujiDk)
-                        .disabled(selectedPrefectureName.isEmpty)
+                    if isSaving {
+                        ProgressView()
+                    } else {
+                        Button("保存") { save() }
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.irohaFujiDk)
+                            .disabled(selectedPrefectureName.isEmpty)
+                    }
                 }
             }
             .onAppear { populateFields() }
@@ -113,10 +119,32 @@ struct VisitFormView: View {
             } message: {
                 Text(saveErrorMessage)
             }
+            .overlay {
+                if isSaving { savingOverlay }
+            }
         }
+        .interactiveDismissDisabled(isSaving)
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .presentationBackground(Color.irohaWashi)
+    }
+
+    @ViewBuilder
+    private var savingOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.2)
+                .ignoresSafeArea()
+            VStack(spacing: 12) {
+                ProgressView()
+                    .controlSize(.large)
+                Text("保存中…")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.primary)
+            }
+            .padding(24)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        }
+        .transition(.opacity)
     }
 
     // MARK: - Rows
@@ -1060,6 +1088,8 @@ struct VisitFormView: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
+
         let computedEndDate: Date? = {
             Calendar.current.isDate(endDate, inSameDayAs: visitDate) ? nil : endDate
         }()
@@ -1126,31 +1156,84 @@ struct VisitFormView: View {
             }
         }
 
-        // 新規追加処理: photoFilenameMap[i] == nil のものを VisitPhoto として追加
-        var addedPhotos: [VisitPhoto] = []
+        // 新規追加対象を抽出 (photoFilenameMap[i] == nil のもの)
+        var newImages: [(index: Int, image: UIImage)] = []
         for (i, image) in photoImages.enumerated() {
             if i < photoFilenameMap.count, photoFilenameMap[i] != nil {
                 continue
             }
-            if let photo = VisitPhotoStore.append(image: image, to: visit, in: modelContext) {
-                addedPhotos.append(photo)
-            }
+            newImages.append((i, image))
         }
 
-        do {
-            try modelContext.save()
-            for filename in legacyFilenamesToDeleteFromDisk {
-                PhotoStorageManager.delete(filename: filename)
+        isSaving = true
+
+        // background で並列圧縮 → MainActor で順序通り insert + save
+        Task {
+            let payloads = await Self.compressInParallel(newImages)
+
+            await MainActor.run {
+                var addedPhotos: [VisitPhoto] = []
+                for (_, payload) in payloads {
+                    let inserted = VisitPhotoStore.insert(payload: payload, into: visit, in: modelContext)
+                    addedPhotos.append(inserted)
+                }
+
+                do {
+                    try modelContext.save()
+                    for filename in legacyFilenamesToDeleteFromDisk {
+                        PhotoStorageManager.delete(filename: filename)
+                    }
+                    dismiss()
+                } catch {
+                    // ロールバック: 追加した VisitPhoto を削除
+                    for photo in addedPhotos {
+                        modelContext.delete(photo)
+                    }
+                    try? modelContext.save()
+                    saveErrorMessage = error.localizedDescription
+                    showSaveError = true
+                    isSaving = false
+                }
             }
-            dismiss()
-        } catch {
-            // ロールバック: 追加した VisitPhoto を削除
-            for photo in addedPhotos {
-                modelContext.delete(photo)
+        }
+    }
+
+    /// 写真群を並列で圧縮し、入力 index 昇順で結果を返す。
+    /// 圧縮失敗 (nil) は結果から除外。並列度は min(4, processorCount) で頭打ち。
+    private static func compressInParallel(
+        _ images: [(index: Int, image: UIImage)]
+    ) async -> [(index: Int, payload: VisitPhotoStore.CompressedPhotoPayload)] {
+        guard !images.isEmpty else { return [] }
+        let maxConcurrency = min(4, max(2, ProcessInfo.processInfo.activeProcessorCount))
+
+        return await withTaskGroup(of: (Int, VisitPhotoStore.CompressedPhotoPayload?).self) { group in
+            var iterator = images.makeIterator()
+            // 初期投入: 並列度ぶんだけ先行投入
+            for _ in 0..<maxConcurrency {
+                guard let next = iterator.next() else { break }
+                let capturedIndex = next.index
+                let capturedImage = next.image
+                group.addTask(priority: .userInitiated) {
+                    (capturedIndex, VisitPhotoStore.makePayload(from: capturedImage))
+                }
             }
-            try? modelContext.save()
-            saveErrorMessage = error.localizedDescription
-            showSaveError = true
+
+            var results: [(Int, VisitPhotoStore.CompressedPhotoPayload)] = []
+            while let (index, payload) = await group.next() {
+                if let payload {
+                    results.append((index, payload))
+                }
+                // 完了ごとに次の 1 件を投入 (常に maxConcurrency 並列を維持)
+                if let next = iterator.next() {
+                    let capturedIndex = next.index
+                    let capturedImage = next.image
+                    group.addTask(priority: .userInitiated) {
+                        (capturedIndex, VisitPhotoStore.makePayload(from: capturedImage))
+                    }
+                }
+            }
+            results.sort { $0.0 < $1.0 }
+            return results.map { (index: $0.0, payload: $0.1) }
         }
     }
 
