@@ -242,12 +242,16 @@ struct TimelineView: View {
         Menu {
             Button("すべて") { filterMood = nil }
             ForEach(VisitMood.selectable, id: \.rawValue) { mood in
-                Button("\(mood.displayName) \(mood.label)") { filterMood = mood }
+                Button {
+                    filterMood = mood
+                } label: {
+                    Text(verbatim: "\(mood.displayName) \(mood.label)")
+                }
             }
         } label: {
             filterChipLabel(
                 label: "ムード",
-                value: filterMood.map { "\($0.displayName) \($0.label)" },
+                value: filterMood?.displayName,
                 isActive: filterMood != nil
             )
         }
@@ -320,17 +324,24 @@ struct TimelineView: View {
 
     private func filterChipLabel(label: String, value: String?, isActive: Bool) -> some View {
         HStack(spacing: 4) {
-            Text(value ?? label)
+            Text(verbatim: value ?? label)
                 .font(.system(size: 13, weight: isActive ? .bold : .semibold))
                 .foregroundColor(isActive ? .white : .irohaSumi2)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
             Image(systemName: "chevron.down")
                 .font(.system(size: 9, weight: .bold))
                 .foregroundColor(isActive ? .white.opacity(0.8) : .irohaSumi3)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
-        .background(isActive ? Color.irohaFujiDk : Color.irohaWashi2)
-        .clipShape(Capsule())
+        .background {
+            // RoundedRectangle で曲率を固定化し、幅変化中の Capsule 端の歪みを回避
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(isActive ? Color.irohaFujiDk : Color.irohaWashi2)
+        }
+        // Menu 選択直後の value 幅補間でチップ端が一瞬崩れるのを抑止
+        .animation(nil, value: value)
     }
 
     // MARK: - Year header
