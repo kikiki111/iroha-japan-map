@@ -46,6 +46,7 @@ struct VisitFormView: View {
     @State private var prefectureSearch = ""
     @State private var activeDateField: DateField = .start
     @State private var pickerRefreshId = 0
+    @State private var skipNextEndDateChange = false
 
     private var isEditing: Bool { editingVisit != nil }
     private var isPrefectureLocked: Bool { prefecture != nil }
@@ -190,7 +191,23 @@ struct VisitFormView: View {
             let visitYM = calendar.dateComponents([.year, .month], from: visitDate)
             let endYM = calendar.dateComponents([.year, .month], from: endDate)
             if visitYM.year != endYM.year || visitYM.month != endYM.month {
+                skipNextEndDateChange = true
                 endDate = visitDate
+            }
+        }
+        // 帰着日 picker が描画されているか否かに関わらず endDate 変更を捕捉するため、親 View レベルに配置。
+        // 帰着日 picker 内に書くと、開始日操作中の endDate 自動調整時に発火せず、フラグが残留してしまう。
+        .onChange(of: endDate) { oldDate, newDate in
+            // 自動調整による変更（フラグ立ち）はスキップ。
+            if skipNextEndDateChange {
+                skipNextEndDateChange = false
+                return
+            }
+            // 帰着日 picker 操作中のユーザー日タップで旅行日セクションを閉じる。
+            // ホイール式年月ピッカーで日が自動調整されたケースのみ除外する。
+            guard activeDateField == .end else { return }
+            if isUserDayTap(from: oldDate, to: newDate) {
+                expandedSection = nil
             }
         }
     }
@@ -711,15 +728,12 @@ struct VisitFormView: View {
                     let calendar = Calendar.current
                     if newDate > endDate {
                         let duration = calendar.dateComponents([.day], from: oldDate, to: endDate).day ?? 0
+                        skipNextEndDateChange = true
                         endDate = calendar.date(byAdding: .day, value: max(duration, 0), to: newDate) ?? newDate
                     }
-                    // 年月ホイール操作（年・月のみ変更）では切替しない。日付グリッドで日をタップした時のみ次へ進む
-                    let oldComp = calendar.dateComponents([.year, .month, .day], from: oldDate)
-                    let newComp = calendar.dateComponents([.year, .month, .day], from: newDate)
-                    let isDayLevelChange = oldComp.year == newComp.year
-                        && oldComp.month == newComp.month
-                        && oldComp.day != newComp.day
-                    if isDayLevelChange {
+                    // ユーザーの日タップ（同月内 or 横スライド/月送り後）で帰着日へ遷移。
+                    // ホイール式年月ピッカーで日が自動調整されたケース（5/31→6/30 等）のみ除外する。
+                    if isUserDayTap(from: oldDate, to: newDate) {
                         activeDateField = .end
                     }
                 }
@@ -740,18 +754,6 @@ struct VisitFormView: View {
                 .environment(\.locale, Locale(identifier: "ja_JP"))
                 .labelsHidden()
                 .id(pickerRefreshId)
-                .onChange(of: endDate) { oldDate, newDate in
-                    // 年月ホイール操作では閉じない。日付グリッドで日をタップした時のみ旅行日セクションを閉じる
-                    let calendar = Calendar.current
-                    let oldComp = calendar.dateComponents([.year, .month, .day], from: oldDate)
-                    let newComp = calendar.dateComponents([.year, .month, .day], from: newDate)
-                    let isDayLevelChange = oldComp.year == newComp.year
-                        && oldComp.month == newComp.month
-                        && oldComp.day != newComp.day
-                    if isDayLevelChange {
-                        expandedSection = nil
-                    }
-                }
 
                 pickerDoneLink
             }
@@ -764,14 +766,10 @@ struct VisitFormView: View {
         HStack {
             Spacer()
             Button {
+                // 完了ボタンは「ホイール式年月ピッカーを閉じてグリッドに戻す」リフレッシュのみ。
+                // 開始日 → 帰着日 picker への遷移、および 帰着日 → セクション閉じる動作は、
+                // いずれも日付グリッドの日タップで自動的に行われる。
                 pickerRefreshId += 1
-                // 日付タップ時と同じ進行を提供:
-                // 開始日 picker → 帰着日 picker、帰着日 picker → セクション閉じる
-                if activeDateField == .start {
-                    activeDateField = .end
-                } else {
-                    expandedSection = nil
-                }
             } label: {
                 Text("完了")
                     .font(.system(size: 14, weight: .medium))
@@ -795,6 +793,25 @@ struct VisitFormView: View {
         .padding(.vertical, 8)
         .contentShape(Rectangle())
         .onTapGesture { activeDateField = field }
+    }
+
+    // DatePicker の selection 変更が「ユーザーの日タップ」によるものか判定する。
+    // 同月内の日変化、および横スライド/月送り後の日タップを「日タップ」とみなす。
+    // ホイール式年月ピッカーで新月にその日が存在せず最終日に切り詰められたケース
+    // (例: 5/31 → 6/30) のみ除外。
+    private func isUserDayTap(from oldDate: Date, to newDate: Date) -> Bool {
+        let calendar = Calendar.current
+        let oldComp = calendar.dateComponents([.year, .month, .day], from: oldDate)
+        let newComp = calendar.dateComponents([.year, .month, .day], from: newDate)
+        guard let oldDay = oldComp.day, let newDay = newComp.day, oldDay != newDay else {
+            return false
+        }
+        if oldComp.year == newComp.year && oldComp.month == newComp.month {
+            return true
+        }
+        let newMonthLastDay = (calendar.range(of: .day, in: .month, for: newDate)?.upperBound ?? 32) - 1
+        let isWheelAutoAdjustment = (newDay == newMonthLastDay) && (oldDay > newMonthLastDay)
+        return !isWheelAutoAdjustment
     }
 
     private var tagPickerContent: some View {
