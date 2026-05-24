@@ -35,6 +35,7 @@ struct VisitFormView: View {
     @State private var showDeleteConfirmation = false
     @State private var showSaveError = false
     @State private var saveErrorMessage = ""
+    @State private var isSaving = false
     @State private var isSelectingFromSuggestion = false
     @State private var didPopulate = false
     @FocusState private var locationFieldFocused: Bool
@@ -45,6 +46,7 @@ struct VisitFormView: View {
     @State private var prefectureSearch = ""
     @State private var activeDateField: DateField = .start
     @State private var pickerRefreshId = 0
+    @State private var skipNextEndDateChange = false
 
     private var isEditing: Bool { editingVisit != nil }
     private var isPrefectureLocked: Bool { prefecture != nil }
@@ -95,12 +97,17 @@ struct VisitFormView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("キャンセル") { dismiss() }
+                        .disabled(isSaving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { save() }
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(.irohaFujiDk)
-                        .disabled(selectedPrefectureName.isEmpty)
+                    if isSaving {
+                        ProgressView()
+                    } else {
+                        Button("保存") { save() }
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.irohaFujiDk)
+                            .disabled(selectedPrefectureName.isEmpty)
+                    }
                 }
             }
             .onAppear { populateFields() }
@@ -113,10 +120,32 @@ struct VisitFormView: View {
             } message: {
                 Text(saveErrorMessage)
             }
+            .overlay {
+                if isSaving { savingOverlay }
+            }
         }
+        .interactiveDismissDisabled(isSaving)
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .presentationBackground(Color.irohaWashi)
+    }
+
+    @ViewBuilder
+    private var savingOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.2)
+                .ignoresSafeArea()
+            VStack(spacing: 12) {
+                ProgressView()
+                    .controlSize(.large)
+                Text("保存中…")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.primary)
+            }
+            .padding(24)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        }
+        .transition(.opacity)
     }
 
     // MARK: - Rows
@@ -162,7 +191,23 @@ struct VisitFormView: View {
             let visitYM = calendar.dateComponents([.year, .month], from: visitDate)
             let endYM = calendar.dateComponents([.year, .month], from: endDate)
             if visitYM.year != endYM.year || visitYM.month != endYM.month {
+                skipNextEndDateChange = true
                 endDate = visitDate
+            }
+        }
+        // 帰着日 picker が描画されているか否かに関わらず endDate 変更を捕捉するため、親 View レベルに配置。
+        // 帰着日 picker 内に書くと、開始日操作中の endDate 自動調整時に発火せず、フラグが残留してしまう。
+        .onChange(of: endDate) { oldDate, newDate in
+            // 自動調整による変更（フラグ立ち）はスキップ。
+            if skipNextEndDateChange {
+                skipNextEndDateChange = false
+                return
+            }
+            // 帰着日 picker 操作中のユーザー日タップで旅行日セクションを閉じる。
+            // ホイール式年月ピッカーで日が自動調整されたケースのみ除外する。
+            guard activeDateField == .end else { return }
+            if isUserDayTap(from: oldDate, to: newDate) {
+                expandedSection = nil
             }
         }
     }
@@ -683,15 +728,12 @@ struct VisitFormView: View {
                     let calendar = Calendar.current
                     if newDate > endDate {
                         let duration = calendar.dateComponents([.day], from: oldDate, to: endDate).day ?? 0
+                        skipNextEndDateChange = true
                         endDate = calendar.date(byAdding: .day, value: max(duration, 0), to: newDate) ?? newDate
                     }
-                    // 年月ホイール操作（年・月のみ変更）では切替しない。日付グリッドで日をタップした時のみ次へ進む
-                    let oldComp = calendar.dateComponents([.year, .month, .day], from: oldDate)
-                    let newComp = calendar.dateComponents([.year, .month, .day], from: newDate)
-                    let isDayLevelChange = oldComp.year == newComp.year
-                        && oldComp.month == newComp.month
-                        && oldComp.day != newComp.day
-                    if isDayLevelChange {
+                    // ユーザーの日タップ（同月内 or 横スライド/月送り後）で帰着日へ遷移。
+                    // ホイール式年月ピッカーで日が自動調整されたケース（5/31→6/30 等）のみ除外する。
+                    if isUserDayTap(from: oldDate, to: newDate) {
                         activeDateField = .end
                     }
                 }
@@ -712,18 +754,6 @@ struct VisitFormView: View {
                 .environment(\.locale, Locale(identifier: "ja_JP"))
                 .labelsHidden()
                 .id(pickerRefreshId)
-                .onChange(of: endDate) { oldDate, newDate in
-                    // 年月ホイール操作では閉じない。日付グリッドで日をタップした時のみ旅行日セクションを閉じる
-                    let calendar = Calendar.current
-                    let oldComp = calendar.dateComponents([.year, .month, .day], from: oldDate)
-                    let newComp = calendar.dateComponents([.year, .month, .day], from: newDate)
-                    let isDayLevelChange = oldComp.year == newComp.year
-                        && oldComp.month == newComp.month
-                        && oldComp.day != newComp.day
-                    if isDayLevelChange {
-                        expandedSection = nil
-                    }
-                }
 
                 pickerDoneLink
             }
@@ -736,14 +766,10 @@ struct VisitFormView: View {
         HStack {
             Spacer()
             Button {
+                // 完了ボタンは「ホイール式年月ピッカーを閉じてグリッドに戻す」リフレッシュのみ。
+                // 開始日 → 帰着日 picker への遷移、および 帰着日 → セクション閉じる動作は、
+                // いずれも日付グリッドの日タップで自動的に行われる。
                 pickerRefreshId += 1
-                // 日付タップ時と同じ進行を提供:
-                // 開始日 picker → 帰着日 picker、帰着日 picker → セクション閉じる
-                if activeDateField == .start {
-                    activeDateField = .end
-                } else {
-                    expandedSection = nil
-                }
             } label: {
                 Text("完了")
                     .font(.system(size: 14, weight: .medium))
@@ -767,6 +793,25 @@ struct VisitFormView: View {
         .padding(.vertical, 8)
         .contentShape(Rectangle())
         .onTapGesture { activeDateField = field }
+    }
+
+    // DatePicker の selection 変更が「ユーザーの日タップ」によるものか判定する。
+    // 同月内の日変化、および横スライド/月送り後の日タップを「日タップ」とみなす。
+    // ホイール式年月ピッカーで新月にその日が存在せず最終日に切り詰められたケース
+    // (例: 5/31 → 6/30) のみ除外。
+    private func isUserDayTap(from oldDate: Date, to newDate: Date) -> Bool {
+        let calendar = Calendar.current
+        let oldComp = calendar.dateComponents([.year, .month, .day], from: oldDate)
+        let newComp = calendar.dateComponents([.year, .month, .day], from: newDate)
+        guard let oldDay = oldComp.day, let newDay = newComp.day, oldDay != newDay else {
+            return false
+        }
+        if oldComp.year == newComp.year && oldComp.month == newComp.month {
+            return true
+        }
+        let newMonthLastDay = (calendar.range(of: .day, in: .month, for: newDate)?.upperBound ?? 32) - 1
+        let isWheelAutoAdjustment = (newDay == newMonthLastDay) && (oldDay > newMonthLastDay)
+        return !isWheelAutoAdjustment
     }
 
     private var tagPickerContent: some View {
@@ -1060,6 +1105,8 @@ struct VisitFormView: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
+
         let computedEndDate: Date? = {
             Calendar.current.isDate(endDate, inSameDayAs: visitDate) ? nil : endDate
         }()
@@ -1126,31 +1173,84 @@ struct VisitFormView: View {
             }
         }
 
-        // 新規追加処理: photoFilenameMap[i] == nil のものを VisitPhoto として追加
-        var addedPhotos: [VisitPhoto] = []
+        // 新規追加対象を抽出 (photoFilenameMap[i] == nil のもの)
+        var newImages: [(index: Int, image: UIImage)] = []
         for (i, image) in photoImages.enumerated() {
             if i < photoFilenameMap.count, photoFilenameMap[i] != nil {
                 continue
             }
-            if let photo = VisitPhotoStore.append(image: image, to: visit, in: modelContext) {
-                addedPhotos.append(photo)
-            }
+            newImages.append((i, image))
         }
 
-        do {
-            try modelContext.save()
-            for filename in legacyFilenamesToDeleteFromDisk {
-                PhotoStorageManager.delete(filename: filename)
+        isSaving = true
+
+        // background で並列圧縮 → MainActor で順序通り insert + save
+        Task {
+            let payloads = await Self.compressInParallel(newImages)
+
+            await MainActor.run {
+                var addedPhotos: [VisitPhoto] = []
+                for (_, payload) in payloads {
+                    let inserted = VisitPhotoStore.insert(payload: payload, into: visit, in: modelContext)
+                    addedPhotos.append(inserted)
+                }
+
+                do {
+                    try modelContext.save()
+                    for filename in legacyFilenamesToDeleteFromDisk {
+                        PhotoStorageManager.delete(filename: filename)
+                    }
+                    dismiss()
+                } catch {
+                    // ロールバック: 追加した VisitPhoto を削除
+                    for photo in addedPhotos {
+                        modelContext.delete(photo)
+                    }
+                    try? modelContext.save()
+                    saveErrorMessage = error.localizedDescription
+                    showSaveError = true
+                    isSaving = false
+                }
             }
-            dismiss()
-        } catch {
-            // ロールバック: 追加した VisitPhoto を削除
-            for photo in addedPhotos {
-                modelContext.delete(photo)
+        }
+    }
+
+    /// 写真群を並列で圧縮し、入力 index 昇順で結果を返す。
+    /// 圧縮失敗 (nil) は結果から除外。並列度は min(4, processorCount) で頭打ち。
+    private static func compressInParallel(
+        _ images: [(index: Int, image: UIImage)]
+    ) async -> [(index: Int, payload: VisitPhotoStore.CompressedPhotoPayload)] {
+        guard !images.isEmpty else { return [] }
+        let maxConcurrency = min(4, max(2, ProcessInfo.processInfo.activeProcessorCount))
+
+        return await withTaskGroup(of: (Int, VisitPhotoStore.CompressedPhotoPayload?).self) { group in
+            var iterator = images.makeIterator()
+            // 初期投入: 並列度ぶんだけ先行投入
+            for _ in 0..<maxConcurrency {
+                guard let next = iterator.next() else { break }
+                let capturedIndex = next.index
+                let capturedImage = next.image
+                group.addTask(priority: .userInitiated) {
+                    (capturedIndex, VisitPhotoStore.makePayload(from: capturedImage))
+                }
             }
-            try? modelContext.save()
-            saveErrorMessage = error.localizedDescription
-            showSaveError = true
+
+            var results: [(Int, VisitPhotoStore.CompressedPhotoPayload)] = []
+            while let (index, payload) = await group.next() {
+                if let payload {
+                    results.append((index, payload))
+                }
+                // 完了ごとに次の 1 件を投入 (常に maxConcurrency 並列を維持)
+                if let next = iterator.next() {
+                    let capturedIndex = next.index
+                    let capturedImage = next.image
+                    group.addTask(priority: .userInitiated) {
+                        (capturedIndex, VisitPhotoStore.makePayload(from: capturedImage))
+                    }
+                }
+            }
+            results.sort { $0.0 < $1.0 }
+            return results.map { (index: $0.0, payload: $0.1) }
         }
     }
 

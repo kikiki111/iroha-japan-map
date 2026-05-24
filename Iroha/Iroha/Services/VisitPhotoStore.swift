@@ -32,19 +32,31 @@ enum VisitPhotoStore {
 
     // MARK: - Public API
 
-    /// `UIImage` から `VisitPhoto` を生成して `Visit` に追加する。
-    /// 画像は最大 2048px / 5MB 以内に強制縮小される。
-    @discardableResult
-    static func append(image: UIImage, to visit: Visit, in context: ModelContext, legacyFilename: String? = nil) -> VisitPhoto? {
-        guard let imageData = compressedFullImageData(from: image),
-              let thumbnailData = thumbnailData(from: image) else {
+    /// 圧縮済み写真データ (フルサイズ + サムネイル)。
+    /// background actor 越境のため `Sendable`。`UIImage` を持ち越さないことで thread safety を担保。
+    struct CompressedPhotoPayload: Sendable {
+        let fullImageData: Data
+        let thumbnailData: Data
+    }
+
+    /// `UIImage` を圧縮・サムネイル生成して `CompressedPhotoPayload` を返す。
+    /// 純粋関数: SwiftData を触らず副作用なし。background actor / detached Task から呼べる。
+    static func makePayload(from image: UIImage) -> CompressedPhotoPayload? {
+        guard let full = compressedFullImageData(from: image),
+              let thumb = thumbnailData(from: image) else {
             return nil
         }
+        return CompressedPhotoPayload(fullImageData: full, thumbnailData: thumb)
+    }
 
+    /// 圧縮済み `CompressedPhotoPayload` から `VisitPhoto` を生成して `Visit` に追加する。
+    /// `ModelContext` は MainActor 結びのため、本関数は MainActor から呼ぶこと。
+    @discardableResult
+    static func insert(payload: CompressedPhotoPayload, into visit: Visit, in context: ModelContext, legacyFilename: String? = nil) -> VisitPhoto {
         let nextOrder = (visit.photos ?? []).map(\.orderIndex).max().map { $0 + 1 } ?? 0
         let photo = VisitPhoto(
-            imageData: imageData,
-            thumbnailData: thumbnailData,
+            imageData: payload.fullImageData,
+            thumbnailData: payload.thumbnailData,
             orderIndex: nextOrder,
             legacyFilename: legacyFilename
         )
@@ -53,6 +65,15 @@ enum VisitPhotoStore {
         visit.photos?.append(photo)
         context.insert(photo)
         return photo
+    }
+
+    /// `UIImage` から `VisitPhoto` を生成して `Visit` に追加する。
+    /// 画像は最大 2048px / 5MB 以内に強制縮小される。
+    /// 内部的に `makePayload` + `insert` を直列で呼ぶ同期 API（後方互換用）。
+    @discardableResult
+    static func append(image: UIImage, to visit: Visit, in context: ModelContext, legacyFilename: String? = nil) -> VisitPhoto? {
+        guard let payload = makePayload(from: image) else { return nil }
+        return insert(payload: payload, into: visit, in: context, legacyFilename: legacyFilename)
     }
 
     /// 既存ファイルデータ (旧 Documents/Photos/ から読み込んだもの) を
