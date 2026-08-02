@@ -430,7 +430,7 @@ struct JourneyTrackerView: View {
                     highlightRow(
                         icon: "airplane.departure",
                         label: "初旅",
-                        value: "\(firstVisit.startDate.formatted(.dateTime.year().month().day().locale(Locale(identifier: "ja_JP")))) \u{00B7} \(firstVisit.prefectureName)",
+                        value: "\(VisitDateFormat.startText(firstVisit)) \u{00B7} \(firstVisit.prefectureName)",
                         thumbnail: firstVisit.sortedPhotoThumbnails.first
                     ) {
                         highlightTrip = firstTrip

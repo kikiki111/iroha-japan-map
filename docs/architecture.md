@@ -56,6 +56,10 @@ ContentView
 - startDate（旅行の開始日 / 居住の開始日）, endDate（**旅行専用**、nil = 日帰り）, note
 - residenceEndDate: Date?（**居住専用**の終了日）, isResidenceOngoing: Bool（現在も居住中）
   - endDate と residenceEndDate を分けているのは、nil の意味が「日帰り」と「継続中」で衝突するため
+- dateAccuracy: DateAccuracy?（**旅行専用**の日付粒度。nil = 旧データ → effectiveDateAccuracy で .day に倒す）
+  - 昔の旅行など日付が曖昧な記録用。`.month` / `.year` では startDate に代表日（月末 / 12/31、未来日は今日でクランプ）を格納する
+  - startDate を Date のまま保つことで、`@Query(sort: \Visit.startDate)` 8 箇所と年フィルタを無改変で通せる
+  - 居住は residencePeriodText で既に年月粒度の表示を持つため対象外（常に .day 扱い）
 - tag: String?（旅行スタイル ID。kind と直交する軸で、居住でも選べる。プリセットは `TravelStylePreset.rawValue`、ユーザー定義は `"u:<UUID>"`。未選択は nil で、レガシー文字列 `"none"` も未選択として扱う）
 - mood: VisitMood?（楽 / 癒 / 感 / 驚 / 懐 / 静）
 - transports, tripName, companions, location, locationLatitude, locationLongitude
@@ -63,7 +67,8 @@ ContentView
 - 旧 photoFilenames / photoThumbnails / photoFilename / photoThumbnail（PhotoMigration 完了確認まで併存）
 - 互換ヘルパー: totalPhotoCount, sortedPhotoThumbnails, sortedPhotoFilenames, sortedPhotos
 - 居住ヘルパー: effectiveKind, isResidence, residencePeriodText, residenceDurationText
-- 新フィールド追加時は CloudKit 互換のため **optional か default 値付き** が必須（`kind` は optional、`isResidenceOngoing` は default false）。lightweight migration で自動処理されるため専用 Migration は不要
+- 日付精度ヘルパー: effectiveDateAccuracy, isDateAmbiguous, nightCount（曖昧な日付・居住では nil）
+- 新フィールド追加時は CloudKit 互換のため **optional か default 値付き** が必須（`kind` / `dateAccuracy` は optional、`isResidenceOngoing` は default false）。lightweight migration で自動処理されるため専用 Migration は不要
 
 ### VisitPhoto（SwiftData @Model — CloudKit 同期対象 / Phase 6 で有効化）
 - id: UUID
@@ -130,10 +135,18 @@ Prefecture（SwiftData）←→ MapViewModel → JapanMapView（WKWebView）
 0. **居住記録（`isResidence`）を入口で除外**
    （居住は期間が数年に及ぶため、3 日ルールに混ぜると居住期間中の全旅行が 1 つの巨大 Trip に併合される。
    旅数・移動距離・タイムライン・バッジ 3 種の共通防御点）
-1. 残った Visit を startDate でソート
+0'. **日付が曖昧な記録（`isDateAmbiguous`）を確定日付の群から分離**
+   （代表日が実際の訪問日と一致しないため。時系列の途中に混ざると、その前後にある
+   確定日付どうしの連結まで分断してしまう。曖昧な記録は常に単独 Trip とする）
+1. 確定日付の Visit を startDate でソート（同一日は県名をタイブレーカーに）
 2. 前の Visit の effectiveEndDate から次の Visit の startDate が 3日以内 → 同じ旅行グループ
 3. グループを Trip オブジェクトに変換（FNV-1a ハッシュで確定的 UUID 生成）
+   - seed はグループを構成する `persistentModelID` のハッシュ。「県名 + 代表日」だと
+     同一県・同一年の曖昧な記録（どちらも 12/31 に丸まる）で Trip.id が衝突し、
+     `sheet(item:)` が片方しか開けなくなるため
 4. Trip を月別にグルーピングして TimelineView に表示
+   - 年しか分からない記録は「時期不明」セクションとして各年の末尾に集約する
+     （代表日 12/31 のままだと降順ソートで年の先頭に来てしまうため、比較関数で明示的に後段へ回す）
 
 ## マイルストーンシステム
 - MapViewModel.detectMilestone() で訪問保存後に検出
@@ -155,6 +168,9 @@ Prefecture（SwiftData）←→ MapViewModel → JapanMapView（WKWebView）
 - ModelContainer の `cloudKitDatabase: .private("iCloud.com.qumo.Iroha")` で有効化
 - Schema は [Visit.self, VisitPhoto.self, TravelStyleRecord.self]（Prefecture と旅行スタイルのプリセットは静的テーブル、同期対象外）
 - `TravelStyleRecord` は新しい CKRecord タイプなので、**リリース前に CloudKit Dashboard で Production へスキーマをデプロイする**
+- 既存 @Model へのフィールド追加（`Visit.dateAccuracy` = `CD_dateAccuracy` など）も同じくデプロイが要る。
+  Development はスキーマが自動生成されるため Debug ビルドの検証は素通りするが、Production 未反映のまま
+  Release を配布すると、そのフィールドを含む Visit の push が丸ごと失敗する
 - ユーザの ON/OFF 設定: UserDefaults `cloud_sync_enabled`
 - 初回起動時: CloudSyncOnboardingView で選択
 - ON/OFF 切替は ModelContainer の起動時固定のため、変更後はアプリ再起動を要求

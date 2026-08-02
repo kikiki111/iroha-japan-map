@@ -431,10 +431,11 @@ struct TimelineView: View {
         // 居住はスタイル/ムード/移動手段/同行者フィルタの対象外。
         // フィルタ適用中は旅行の絞り込みに集中させるため居住行を隠す。
         let residences = hasActiveFilter ? [] : filteredResidences
-        let entries: [TimelineEntry] = (
+        let entries = timelineSorted(
             allTrips.map { TimelineEntry.trip($0) } +
-            residences.map { TimelineEntry.residence($0) }
-        ).sorted { $0.date > $1.date }
+            residences.map { TimelineEntry.residence($0) },
+            calendar: calendar
+        )
 
         if entries.isEmpty && hasActiveFilter {
             filteredEmptyState
@@ -447,6 +448,8 @@ struct TimelineView: View {
                         timelineYearHeader(year: year)
                     case .monthHeader(let month):
                         timelineMonthHeader(month: month)
+                    case .unknownPeriodHeader:
+                        timelineUnknownPeriodHeader()
                     case .trip(let trip, let isLast):
                         timelineTripRow(trip: trip, isLast: isLast)
                         timelineRowDivider(index: index, items: items, isLast: isLast)
@@ -491,13 +494,15 @@ struct TimelineView: View {
     private enum TimelineItem {
         case yearHeader(Int)
         case monthHeader(Int)
+        /// 年しか分からない記録をまとめるセクション見出し（各年の末尾に 1 回だけ出す）
+        case unknownPeriodHeader
         case trip(Trip, isLast: Bool)
         /// 居住の開始月に 1 件だけ差し込む行（期間中の各月には出さない）
         case residence(Visit, isLast: Bool)
 
         var isSectionHeader: Bool {
             switch self {
-            case .yearHeader, .monthHeader: return true
+            case .yearHeader, .monthHeader, .unknownPeriodHeader: return true
             case .trip, .residence: return false
             }
         }
@@ -514,25 +519,66 @@ struct TimelineView: View {
             case .residence(let visit): return visit.startDate
             }
         }
+
+        /// 「時期不明」セクションに入れる要素か (年しか分からない旅)。
+        /// 年月精度は月が確定しているので通常の月ヘッダーに載せる。
+        /// 居住は年月粒度の専用表示を持つため常に false。
+        var isUnknownPeriod: Bool {
+            switch self {
+            case .trip(let trip): return trip.dateAccuracy == .year
+            case .residence:      return false
+            }
+        }
+    }
+
+    /// タイムラインの並び順。
+    ///
+    /// 1. 年の降順 (新しい年が上)
+    /// 2. 同一年内では日付が確定した要素を先に、時期不明を末尾に
+    /// 3. その中では代表日の降順
+    ///
+    /// `.year` の代表日は 12/31 (その年で最も新しい日付) なので、単純な日付降順だと
+    /// 年の先頭に来てしまう。「時期不明は年の末尾」という表示意図を守るため明示的に後段へ回す。
+    private func timelineSorted(_ entries: [TimelineEntry], calendar: Calendar) -> [TimelineEntry] {
+        entries.sorted { lhs, rhs in
+            let lhsYear = calendar.component(.year, from: lhs.date)
+            let rhsYear = calendar.component(.year, from: rhs.date)
+            if lhsYear != rhsYear { return lhsYear > rhsYear }
+
+            if lhs.isUnknownPeriod != rhs.isUnknownPeriod { return !lhs.isUnknownPeriod }
+
+            return lhs.date > rhs.date
+        }
     }
 
     private func buildTimelineItems(entries: [TimelineEntry], calendar: Calendar) -> [TimelineItem] {
         var items: [TimelineItem] = []
         var lastMonth: Int?
         var lastYear: Int?
+        var didEmitUnknownHeader = false
         for (i, entry) in entries.enumerated() {
             let year = calendar.component(.year, from: entry.date)
-            let month = calendar.component(.month, from: entry.date)
 
             if isAllYearsMode && year != lastYear {
                 items.append(.yearHeader(year))
                 lastYear = year
                 lastMonth = nil
+                // 「時期不明」は年ごとに 1 回ずつ出す
+                didEmitUnknownHeader = false
             }
 
-            if month != lastMonth {
-                items.append(.monthHeader(month))
-                lastMonth = month
+            if entry.isUnknownPeriod {
+                if !didEmitUnknownHeader {
+                    items.append(.unknownPeriodHeader)
+                    didEmitUnknownHeader = true
+                    lastMonth = nil
+                }
+            } else {
+                let month = calendar.component(.month, from: entry.date)
+                if month != lastMonth {
+                    items.append(.monthHeader(month))
+                    lastMonth = month
+                }
             }
 
             let isLast = i == entries.count - 1
@@ -574,6 +620,31 @@ struct TimelineView: View {
         .frame(height: 28)
         .overlay(alignment: .leading) {
             Text(verbatim: "\(month)月")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(.irohaSumi3)
+                .tracking(1)
+                .padding(.horizontal, 6)
+                .background(Color.irohaWashi)
+                .padding(.leading, 36)
+        }
+    }
+
+    /// 年しか分からない記録のセクション見出し。月ヘッダーと同じ骨格でラベルだけ差し替える。
+    private func timelineUnknownPeriodHeader() -> some View {
+        HStack(spacing: 0) {
+            Rectangle()
+                .fill(Color.irohaFuji.opacity(0.3))
+                .frame(width: 2)
+                .padding(.leading, 24)
+
+            Rectangle()
+                .fill(Color.irohaWashi3)
+                .frame(height: 0.5)
+                .padding(.leading, -1)
+        }
+        .frame(height: 28)
+        .overlay(alignment: .leading) {
+            Text("時期不明")
                 .font(.system(size: 13, weight: .bold))
                 .foregroundColor(.irohaSumi3)
                 .tracking(1)
@@ -693,7 +764,6 @@ struct TimelineView: View {
     }
 
     private func tripRowContent(trip: Trip) -> some View {
-        let calendar = Calendar.current
         let allTransports = trip.visits.flatMap(\.effectiveTransports)
         let uniqueTransports = Array(Set(allTransports.map(\.rawValue)))
             .compactMap { VisitTransport(rawValue: $0) }
@@ -720,22 +790,21 @@ struct TimelineView: View {
                     }
                 }
             } else {
-                let startDay = calendar.startOfDay(for: trip.startDate)
-                let endDay = calendar.startOfDay(for: trip.endDate)
-                let calendarNights = calendar.dateComponents([.day], from: startDay, to: endDay).day ?? 0
-
                 HStack(spacing: 6) {
                     Text(trip.prefectureNames.joined(separator: " → "))
                         .font(.system(size: 16, weight: .bold, design: .serif))
                         .foregroundColor(.irohaFujiDk)
 
-                    Text(calendarNights > 0 ? "\(calendarNights)泊\(calendarNights + 1)日" : "日帰り")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.irohaSumi3)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.irohaWashi2)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                    // 日付が曖昧な旅では泊数が確定しないためバッジを出さない
+                    if let nights = trip.nightCount {
+                        Text(nights > 0 ? "\(nights)泊\(nights + 1)日" : "日帰り")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.irohaSumi3)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.irohaWashi2)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
                 }
             }
 
@@ -747,20 +816,10 @@ struct TimelineView: View {
                         .foregroundColor(.irohaSumi3)
                 }
 
-                let isSameDay = calendar.isDate(trip.startDate, inSameDayAs: trip.endDate)
-                if isSameDay {
-                    Text(trip.startDate.formatted(.dateTime.year().month().day().locale(Locale(identifier: "ja_JP"))))
-                        .font(.system(size: 12))
-                        .foregroundColor(.irohaSumi3)
-                } else {
-                    HStack(spacing: 3) {
-                        Text(trip.startDate.formatted(.dateTime.year().month().day().locale(Locale(identifier: "ja_JP"))))
-                        Text("〜")
-                        Text(trip.endDate.formatted(.dateTime.year().month().day().locale(Locale(identifier: "ja_JP"))))
-                    }
+                // 単日か期間かの出し分け・精度ごとの表記は VisitDateFormat が担当する
+                Text(VisitDateFormat.rangeText(trip))
                     .font(.system(size: 12))
                     .foregroundColor(.irohaSumi3)
-                }
             }
 
             // Row 3: Location + trip name + memo (horizontal scroll on overflow)
@@ -894,13 +953,6 @@ struct TripDetailSheet: View {
     @Environment(\.travelStyleCatalog) private var styleCatalog
     @State private var fullscreenSelection: PhotoFullscreenSelection?
 
-    private var nights: Int {
-        let calendar = Calendar.current
-        let startDay = calendar.startOfDay(for: trip.startDate)
-        let endDay = calendar.startOfDay(for: trip.endDate)
-        return calendar.dateComponents([.day], from: startDay, to: endDay).day ?? 0
-    }
-
     private var sortedVisits: [Visit] {
         trip.visits.sorted { $0.startDate < $1.startDate }
     }
@@ -957,22 +1009,17 @@ struct TripDetailSheet: View {
                     .foregroundColor(.irohaFujiDk)
             }
 
-            // Duration badge
-            Text(nights > 0 ? "\(nights)泊\(nights + 1)日" : "日帰り")
-                .font(.system(size: 22, weight: .light, design: .serif))
-                .foregroundColor(.irohaFujiDk)
+            // Duration badge — 日付が曖昧な旅では泊数が確定しないため出さない
+            if let nights = trip.nightCount {
+                Text(nights > 0 ? "\(nights)泊\(nights + 1)日" : "日帰り")
+                    .font(.system(size: 22, weight: .light, design: .serif))
+                    .foregroundColor(.irohaFujiDk)
+            }
 
             // Date range
-            HStack(spacing: 4) {
-                Text(trip.startDate.formatted(.dateTime.year().month().day().locale(Locale(identifier: "ja_JP"))))
-                if nights > 0 {
-                    Text("〜")
-                        .foregroundColor(.irohaSumi3)
-                    Text(trip.endDate.formatted(.dateTime.year().month().day().locale(Locale(identifier: "ja_JP"))))
-                }
-            }
-            .font(.system(size: 13))
-            .foregroundColor(.irohaSumi2)
+            Text(VisitDateFormat.rangeText(trip))
+                .font(.system(size: 13))
+                .foregroundColor(.irohaSumi2)
 
             // Route chips
             ScrollView(.horizontal, showsIndicators: false) {
@@ -1046,7 +1093,7 @@ struct TripDetailSheet: View {
             // Content
             VStack(alignment: .leading, spacing: 6) {
                 // Date
-                Text(visit.startDate.formatted(.dateTime.year().month().day().locale(Locale(identifier: "ja_JP"))))
+                Text(VisitDateFormat.startText(visit))
                     .font(.system(size: 11))
                     .foregroundColor(.irohaSumi3)
 

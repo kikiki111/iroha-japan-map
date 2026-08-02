@@ -317,7 +317,11 @@ struct PrefectureDetailSheet: View {
 
     private var todayVisit: Visit? {
         let calendar = Calendar.current
-        return travelVisits.first { calendar.isDateInToday($0.startDate) }
+        // 日付が曖昧な記録は除外。代表日がたまたま今日と一致しただけで
+        // (例: 12/31 に「今年」の年のみ記録がある) 「今日の記録を編集」に化けてしまう。
+        return travelVisits.first {
+            !$0.isDateAmbiguous && calendar.isDateInToday($0.startDate)
+        }
     }
 
     private var recordButtonsRow: some View {
@@ -435,7 +439,7 @@ struct PrefectureDetailSheet: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(visit.startDate.formatted(.dateTime.year().month().day().locale(Locale(identifier: "ja_JP"))))
+                    Text(VisitDateFormat.startText(visit))
                         .font(.system(size: 15, weight: .bold))
 
                     VisitTagBadge(style: styleCatalog.style(for: visit))

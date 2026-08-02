@@ -467,6 +467,12 @@ enum Badge: String, CaseIterable, Identifiable {
         // `nightOwl` (累計 10 泊) は居住 1 件で即達成してしまう。
         // 写真・メモ・ムード系は居住記録の分も実績に含めてよいので `visits` のまま。
         let travelVisits = visits.filter { !$0.isResidence }
+        // 月が確定している旅行記録。四季 (`fourSeasons` / `samePrefFourSeasons`) と
+        // 12 ヶ月 (`yearRoundTraveler`) の判定に使う。`.month` は代表日こそ月末だが
+        // 月成分は正しいので対象に含め、`.year` (月不明) だけを落とす。
+        let monthKnownVisits = travelVisits.filter { $0.effectiveDateAccuracy.hasMonth }
+        // 日まで確定している旅行記録。日数差を測る `thousandDays` に使う。
+        let dayKnownVisits = travelVisits.filter { !$0.isDateAmbiguous }
 
         switch self {
 
@@ -489,7 +495,7 @@ enum Badge: String, CaseIterable, Identifiable {
 
         case .fourSeasons:
             let calendar = Calendar.current
-            let months = Set(travelVisits.map { calendar.component(.month, from: $0.startDate) })
+            let months = Set(monthKnownVisits.map { calendar.component(.month, from: $0.startDate) })
             let spring = months.contains(where: { (3...5).contains($0) })
             let summer = months.contains(where: { (6...8).contains($0) })
             let autumn = months.contains(where: { (9...11).contains($0) })
@@ -540,7 +546,7 @@ enum Badge: String, CaseIterable, Identifiable {
 
         case .samePrefFourSeasons:
             let calendar = Calendar.current
-            let grouped = Dictionary(grouping: travelVisits, by: \.prefectureName)
+            let grouped = Dictionary(grouping: monthKnownVisits, by: \.prefectureName)
             return grouped.values.contains { prefVisits in
                 let months = Set(prefVisits.map { calendar.component(.month, from: $0.startDate) })
                 let spring = months.contains(where: { (3...5).contains($0) })
@@ -588,26 +594,21 @@ enum Badge: String, CaseIterable, Identifiable {
             return repeats.count >= 5
 
         case .longJourney:
+            // 日付が曖昧な旅は nightCount が nil になり、対象から外れる
+            // (例: 年月精度の「5月〜6月」は代表日の差が 30 日あるが実際の泊数は不明)
             let trips = TripDetector.detect(from: visits)
-            let calendar = Calendar.current
-            return trips.contains { trip in
-                let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: trip.startDate),
-                                                   to: calendar.startOfDay(for: trip.endDate)).day ?? 0
-                return days >= 7
-            }
+            return trips.contains { ($0.nightCount ?? 0) >= 7 }
 
         case .fiveRegions:
             return Region.allCases.filter { stats.isRegionConquered($0) }.count >= 5
 
         case .nightOwl:
-            // 居住を含めると 1 件 (数年) で即達成してしまうため travelVisits 必須
-            let calendar = Calendar.current
-            let totalNights = travelVisits.compactMap { visit -> Int? in
-                let start = calendar.startOfDay(for: visit.startDate)
-                let end = calendar.startOfDay(for: visit.effectiveEndDate)
-                let nights = calendar.dateComponents([.day], from: start, to: end).day ?? 0
-                return nights > 0 ? nights : nil
-            }.reduce(0, +)
+            // `nightCount` は居住と日付が曖昧な記録で nil を返すため、compactMap で自然に落ちる。
+            // (居住を含めると 1 件・数年で即達成してしまう)
+            let totalNights = travelVisits
+                .compactMap(\.nightCount)
+                .filter { $0 > 0 }
+                .reduce(0, +)
             return totalNights >= 10
 
         case .allTransports:
@@ -644,8 +645,9 @@ enum Badge: String, CaseIterable, Identifiable {
             return Prefecture.all.allSatisfy { stats.count(for: $0) >= 2 }
 
         case .thousandDays:
-            guard let earliest = travelVisits.map(\.startDate).min(),
-                  let latest = travelVisits.map(\.startDate).max() else { return false }
+            // 日単位の差を測るので、代表日に丸められた曖昧な記録は除外する
+            guard let earliest = dayKnownVisits.map(\.startDate).min(),
+                  let latest = dayKnownVisits.map(\.startDate).max() else { return false }
             let days = Calendar.current.dateComponents([.day], from: earliest, to: latest).day ?? 0
             return days >= 1000
 
@@ -658,7 +660,7 @@ enum Badge: String, CaseIterable, Identifiable {
 
         case .yearRoundTraveler:
             let calendar = Calendar.current
-            let months = Set(travelVisits.map { calendar.component(.month, from: $0.startDate) })
+            let months = Set(monthKnownVisits.map { calendar.component(.month, from: $0.startDate) })
             return months.count >= 12
 
         case .slowTraveler:

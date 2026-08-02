@@ -23,6 +23,11 @@ final class Visit {
     /// nil = 日帰り（startDate と同日）。**旅行専用**。
     /// 居住の終了日は `residenceEndDate` を使う (nil の意味が衝突するため分離)。
     var endDate: Date?
+    /// 旅行日の入力粒度。nil = `.day`（既存レコード互換）、`effectiveDateAccuracy` で吸収。
+    /// 昔の旅行など日付を覚えていない記録のため、`.month` / `.year` では `startDate` に
+    /// 代表日（月末 / 12/31、未来日は今日でクランプ）を入れる。**旅行専用** —
+    /// 居住は `residencePeriodText` で既に年月粒度の表示を持つため常に `.day` 扱い。
+    var dateAccuracy: DateAccuracy?
     /// 居住の終了日。`isResidenceOngoing == true` のときは nil。
     var residenceEndDate: Date?
     /// 現在も居住中か。true なら `residenceEndDate` は nil。
@@ -73,7 +78,8 @@ final class Visit {
          note: String = "", tag: String? = nil,
          kind: VisitKind = .travel,
          residenceEndDate: Date? = nil,
-         isResidenceOngoing: Bool = false) {
+         isResidenceOngoing: Bool = false,
+         dateAccuracy: DateAccuracy = .day) {
         self.prefectureName     = prefectureName
         self.prefectureID       = prefectureID
         self.startDate          = startDate
@@ -83,6 +89,7 @@ final class Visit {
         self.kind               = kind
         self.residenceEndDate   = residenceEndDate
         self.isResidenceOngoing = isResidenceOngoing
+        self.dateAccuracy       = dateAccuracy
         self.photoFilename      = nil
     }
 
@@ -129,6 +136,32 @@ final class Visit {
     var effectiveEndDate: Date {
         guard !isDeleted else { return startDate }
         return endDate ?? startDate
+    }
+
+    // MARK: - Date accuracy helpers
+
+    /// 日付精度の安全なアクセス（nil → .day）。
+    /// 居住は年月粒度の専用表示 (`residencePeriodText`) を持つため、精度の概念を適用しない。
+    var effectiveDateAccuracy: DateAccuracy {
+        guard !isDeleted, !isResidence else { return .day }
+        return dateAccuracy ?? .day
+    }
+
+    /// 日付が曖昧（日が確定していない）か。
+    /// 旅の自動グルーピング・「◯年前の今日」・四季バッジの除外判定に使う。
+    var isDateAmbiguous: Bool {
+        guard !isDeleted else { return false }
+        return effectiveDateAccuracy.isAmbiguous
+    }
+
+    /// 泊数。曖昧な日付・居住では算出しない（nil）。
+    /// 「N泊M日」表示と `nightOwl` バッジはこの nil を見て除外する。
+    var nightCount: Int? {
+        guard !isDeleted, !isResidence, effectiveDateAccuracy == .day else { return nil }
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: startDate)
+        let end   = calendar.startOfDay(for: effectiveEndDate)
+        return calendar.dateComponents([.day], from: start, to: end).day
     }
 
     // MARK: - Residence helpers
