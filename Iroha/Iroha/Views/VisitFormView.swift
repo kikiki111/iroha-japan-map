@@ -16,8 +16,12 @@ struct VisitFormView: View {
     @Environment(\.modelContext) private var modelContext
 
     @State private var selectedPrefectureName = ""
+    @State private var selectedKind: VisitKind = .travel
     @State private var visitDate = Date()
     @State private var endDate = Date()
+    /// 居住の終了日。`isOngoingResidence` が true のときは保存対象外。
+    @State private var residenceEndDate = Date()
+    @State private var isOngoingResidence = false
     @State private var selectedTag: VisitTag = .none
     @State private var selectedMood: VisitMood = .none
     @State private var selectedTransports: Set<VisitTransport> = []
@@ -55,8 +59,10 @@ struct VisitFormView: View {
     private let maxPhotoCount = 10
 
     private enum FormSection: Hashable {
-        case prefecture, date, tag, location, transport, companion, mood, photo
+        case kind, prefecture, date, tag, location, transport, companion, mood, photo
     }
+
+    private var isResidenceMode: Bool { selectedKind == .residence }
 
     private enum DateField {
         case start, end
@@ -66,23 +72,40 @@ struct VisitFormView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 0) {
+                    kindRow
+                    divider
                     prefectureRow
+                    // 旅行スタイル (一人旅 / 家族旅行 …) は選択肢がすべて旅行前提のため
+                    // 居住では出さない
+                    if !isResidenceMode {
+                        divider
+                        tagRow
+                    }
                     divider
-                    tagRow
-                    divider
-                    dateRow
+                    if isResidenceMode {
+                        residencePeriodRow
+                    } else {
+                        dateRow
+                    }
                     divider
                     locationRow
                     divider
                     photoRow
-                    divider
-                    transportRow
+                    // 移動手段・旅行名は旅行専用
+                    if !isResidenceMode {
+                        divider
+                        transportRow
+                    }
                     divider
                     companionRow
-                    divider
-                    moodRow
-                    divider
-                    tripNameRow
+                    // ムードは「その時の気分」の単発スタンプで、
+                    // 数年間の暮らしを 1 つで表すのは無理があるため居住では出さない
+                    if !isResidenceMode {
+                        divider
+                        moodRow
+                        divider
+                        tripNameRow
+                    }
                     divider
                     memoRow
 
@@ -94,7 +117,7 @@ struct VisitFormView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .background(Color.irohaWashi)
-            .navigationTitle("旅の記録")
+            .navigationTitle(isResidenceMode ? "住んだ記録" : "旅の記録")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -151,6 +174,168 @@ struct VisitFormView: View {
     }
 
     // MARK: - Rows
+
+    private var kindRow: some View {
+        VStack(spacing: 0) {
+            rowHeader(
+                icon: selectedKind.iconName,
+                label: "種別",
+                value: selectedKind.displayName,
+                valueColor: selectedKind.foregroundColor,
+                section: .kind
+            )
+
+            if expandedSection == .kind {
+                kindPickerContent
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    private var kindPickerContent: some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+            ForEach(VisitKind.allCases, id: \.rawValue) { kind in
+                let isSelected = selectedKind == kind
+                Button {
+                    guard selectedKind != kind else { return }
+                    selectedKind = kind
+                    syncDatesForKindChange(to: kind)
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        expandedSection = nil
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: kind.iconName)
+                            .font(.system(size: 13))
+                        Text(kind.displayName)
+                            .font(.system(size: 14, weight: isSelected ? .bold : .medium))
+                    }
+                    .foregroundColor(isSelected ? kind.foregroundColor : .irohaSumi3)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(isSelected ? kind.backgroundColor : Color.irohaWashi2)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(isSelected ? kind.foregroundColor.opacity(0.3) : Color.irohaWashi3, lineWidth: 0.5)
+                    )
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 14)
+    }
+
+    /// 種別切替時に、もう一方の日付 state を破綻させないよう揃える。
+    private func syncDatesForKindChange(to kind: VisitKind) {
+        switch kind {
+        case .residence:
+            // 旅行の帰着日を居住終了日の初期値として引き継ぐ
+            if residenceEndDate < visitDate { residenceEndDate = max(endDate, visitDate) }
+        case .travel:
+            // 居住から戻したときに endDate < visitDate の不正状態を作らない
+            if endDate < visitDate {
+                skipNextEndDateChange = true
+                endDate = visitDate
+            }
+        }
+    }
+
+    private var residencePeriodRow: some View {
+        VStack(spacing: 0) {
+            rowHeader(
+                icon: "calendar",
+                label: "期間",
+                value: formattedResidenceSummary,
+                section: .date
+            )
+
+            if expandedSection == .date {
+                residencePeriodContent
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .onChange(of: expandedSection) { _, newSection in
+            if newSection == .date { activeDateField = .start }
+        }
+    }
+
+    private var residencePeriodContent: some View {
+        VStack(spacing: 8) {
+            dateFieldRow(field: .start, label: "住みはじめた日", date: visitDate)
+            if activeDateField == .start {
+                DatePicker(
+                    "住みはじめた日",
+                    selection: $visitDate,
+                    displayedComponents: .date
+                )
+                .datePickerStyle(.graphical)
+                .tint(.irohaSumikaDk)
+                .environment(\.locale, Locale(identifier: "ja_JP"))
+                .labelsHidden()
+                .id(pickerRefreshId)
+                .onChange(of: visitDate) { oldDate, newDate in
+                    if residenceEndDate < newDate { residenceEndDate = newDate }
+                    if isUserDayTap(from: oldDate, to: newDate), !isOngoingResidence {
+                        activeDateField = .end
+                    }
+                }
+
+                pickerDoneLink
+            }
+
+            Toggle(isOn: $isOngoingResidence) {
+                Text("現在も住んでいる")
+                    .font(.system(size: 15))
+                    .foregroundColor(.irohaSumi2)
+            }
+            .tint(.irohaSumikaDk)
+            .padding(.vertical, 4)
+            .onChange(of: isOngoingResidence) { _, isOngoing in
+                if isOngoing, activeDateField == .end {
+                    activeDateField = .start
+                }
+            }
+
+            if !isOngoingResidence {
+                dateFieldRow(field: .end, label: "引っ越した日", date: residenceEndDate)
+                if activeDateField == .end {
+                    DatePicker(
+                        "引っ越した日",
+                        selection: $residenceEndDate,
+                        in: visitDate...,
+                        displayedComponents: .date
+                    )
+                    .datePickerStyle(.graphical)
+                    .tint(.irohaSumikaDk)
+                    .environment(\.locale, Locale(identifier: "ja_JP"))
+                    .labelsHidden()
+                    .id(pickerRefreshId)
+                    .onChange(of: residenceEndDate) { oldDate, newDate in
+                        if isUserDayTap(from: oldDate, to: newDate) {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                expandedSection = nil
+                            }
+                        }
+                    }
+
+                    pickerDoneLink
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 14)
+    }
+
+    private var formattedResidenceSummary: String {
+        let fmt = { (d: Date) in
+            d.formatted(.dateTime.year().month().locale(Locale(identifier: "ja_JP")))
+        }
+        if isOngoingResidence {
+            return "\(fmt(visitDate)) 〜 現在"
+        }
+        return "\(fmt(visitDate)) 〜 \(fmt(residenceEndDate))"
+    }
 
     private var prefectureRow: some View {
         VStack(spacing: 0) {
@@ -382,7 +567,7 @@ struct VisitFormView: View {
 
     private var locationContent: some View {
         VStack(spacing: 8) {
-            TextField("場所名（例：道後温泉）", text: $location)
+            TextField(isResidenceMode ? "住んでいた場所（例：松山市）" : "場所名（例：道後温泉）", text: $location)
                 .focused($locationFieldFocused)
                 .font(.system(size: 14))
                 .padding(.horizontal, 12)
@@ -483,7 +668,7 @@ struct VisitFormView: View {
                     .foregroundColor(.irohaSumi3)
                     .frame(width: 24)
 
-                Text("同行者")
+                Text(isResidenceMode ? "同居した人" : "同行者")
                     .font(.system(size: 15))
                     .foregroundColor(.irohaSumi2)
 
@@ -648,7 +833,7 @@ struct VisitFormView: View {
 
             ZStack(alignment: .topLeading) {
                 if memo.isEmpty {
-                    Text("旅の思い出を残しておこう…")
+                    Text(isResidenceMode ? "暮らしの思い出を残しておこう…" : "旅の思い出を残しておこう…")
                         .font(.system(size: 15))
                         .foregroundColor(.irohaSumi3.opacity(0.6))
                         .padding(.top, 8)
@@ -1065,8 +1250,12 @@ struct VisitFormView: View {
         didPopulate = true
         if let visit = editingVisit {
             selectedPrefectureName = visit.prefectureName
+            selectedKind = visit.effectiveKind
             visitDate = visit.startDate
             endDate = visit.effectiveEndDate
+            isOngoingResidence = visit.isResidenceOngoing
+            // 終了日なし (継続中 or 未設定) の場合は開始日を初期値にする
+            residenceEndDate = visit.residenceEndDate ?? visit.startDate
             selectedTag = visit.effectiveTag
             selectedMood = visit.effectiveMood
             selectedTransports = Set(visit.effectiveTransports)
@@ -1127,9 +1316,24 @@ struct VisitFormView: View {
     private func save() {
         guard !isSaving else { return }
 
+        // 旅行: endDate は「同日なら nil (= 日帰り)」。居住では使わない。
+        // 居住: 期間は residenceEndDate / isResidenceOngoing 側に持たせる。
         let computedEndDate: Date? = {
-            Calendar.current.isDate(endDate, inSameDayAs: visitDate) ? nil : endDate
+            guard !isResidenceMode else { return nil }
+            return Calendar.current.isDate(endDate, inSameDayAs: visitDate) ? nil : endDate
         }()
+        let computedResidenceEndDate: Date? = {
+            guard isResidenceMode, !isOngoingResidence else { return nil }
+            return residenceEndDate
+        }()
+        let computedIsOngoing = isResidenceMode && isOngoingResidence
+        // 旅行スタイル・移動手段・ムード・旅行名は旅行専用。
+        // 居住では入力欄を出さないので保存もしない (種別を切り替えたときに
+        // 見えていない値が残らないよう、明示的にクリアする)。
+        let computedTag: VisitTag = isResidenceMode ? .none : selectedTag
+        let computedMood: VisitMood = isResidenceMode ? .none : selectedMood
+        let computedTransports = isResidenceMode ? [] : selectedTransports.map(\.rawValue)
+        let computedTripName = isResidenceMode ? "" : tripName
         let resolvedPrefectureID = Prefecture.by(name: selectedPrefectureName)?.id ?? 0
 
         // メタデータ更新 (Visit を確保)
@@ -1138,13 +1342,16 @@ struct VisitFormView: View {
             visit = existing
             visit.prefectureName = selectedPrefectureName
             visit.prefectureID = resolvedPrefectureID
+            visit.kind = selectedKind
             visit.startDate = visitDate
             visit.endDate = computedEndDate
-            visit.tag = selectedTag
-            visit.mood = selectedMood
-            visit.transports = selectedTransports.map(\.rawValue)
+            visit.residenceEndDate = computedResidenceEndDate
+            visit.isResidenceOngoing = computedIsOngoing
+            visit.tag = computedTag
+            visit.mood = computedMood
+            visit.transports = computedTransports
             visit.note = memo
-            visit.tripName = tripName
+            visit.tripName = computedTripName
             visit.companions = companions
             visit.location = location
             visit.locationLatitude = locationLatitude
@@ -1156,11 +1363,14 @@ struct VisitFormView: View {
                 startDate: visitDate,
                 endDate: computedEndDate,
                 note: memo,
-                tag: selectedTag
+                tag: computedTag,
+                kind: selectedKind,
+                residenceEndDate: computedResidenceEndDate,
+                isResidenceOngoing: computedIsOngoing
             )
-            newVisit.mood = selectedMood
-            newVisit.transports = selectedTransports.map(\.rawValue)
-            newVisit.tripName = tripName
+            newVisit.mood = computedMood
+            newVisit.transports = computedTransports
+            newVisit.tripName = computedTripName
             newVisit.companions = companions
             newVisit.location = location
             newVisit.locationLatitude = locationLatitude

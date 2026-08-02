@@ -21,7 +21,9 @@ struct MemoryCardView: View {
         let today = calendar.dateComponents([.month, .day], from: Date())
         let currentYear = calendar.component(.year, from: Date())
 
-        return visits.compactMap { visit in
+        // 居住は除外。引っ越し日が今日の月日と一致しただけで
+        // 「N 年前の今日の旅」として旅行と同列に出てしまうため。
+        return visits.filter { !$0.isResidence }.compactMap { visit in
             let comp = calendar.dateComponents([.month, .day, .year], from: visit.startDate)
             guard comp.month == today.month, comp.day == today.day,
                   let visitYear = comp.year, visitYear < currentYear else { return nil }

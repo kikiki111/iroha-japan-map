@@ -13,10 +13,10 @@
 - アーキテクチャ: MVVM + @Observable
 
 ## ファイル構成
-Iroha/Models/ — @Model クラス（Visit, VisitPhoto）+ static struct（Prefecture）+ enum（Region, VisitTag, VisitMood, VisitTransport, Badge/BadgeCategory/TravelerTier）+ struct（Trip）
+Iroha/Models/ — @Model クラス（Visit, VisitPhoto）+ static struct（Prefecture）+ enum（Region, VisitKind, VisitTag, VisitMood, VisitTransport, Badge/BadgeCategory/TravelerTier）+ struct（Trip）
 Iroha/ViewModels/ — @Observable クラス（MapViewModel）
 Iroha/Views/ — SwiftUI View（CloudSyncOnboardingView 含む）
-Iroha/Views/Components/ — 再利用可能な小コンポーネント（NurikakeNumber, VisitMoodBadge, VisitTagBadge, VisitTransportBadge, VisitCompanionBadge, BadgeCollectionView, BadgeStampView, LocationSearchCompleter, SakuraEffectView）
+Iroha/Views/Components/ — 再利用可能な小コンポーネント（NurikakeNumber, VisitMoodBadge, VisitTagBadge, VisitTransportBadge, VisitCompanionBadge, VisitResidenceBadge, BadgeCollectionView, BadgeStampView, LocationSearchCompleter, SakuraEffectView）
 Iroha/Services/ — ビジネスロジック（TripDetector, PhotoStorageManager, VisitPhotoStore, VisitPrefectureMigration, PhotoMigration, CloudSyncStatusObserver）
 Iroha/Utilities/ — ヘルパー（PrefectureColor, VisitStats, ShareManager, DistanceCalculator）
 Iroha/Resources/ — SVG・アセット

@@ -27,6 +27,8 @@ struct TimelineView: View {
 
     private var isAllYearsMode: Bool { selectedYear == -1 }
 
+    /// 年タブの候補。居住は「住みはじめた年」を候補に含める
+    /// (その年に旅行がなくても居住行を見られるようにするため)。
     private var availableYears: [Int] {
         let calendar = Calendar.current
         let years = Set(visits.map { calendar.component(.year, from: $0.startDate) })
@@ -38,10 +40,23 @@ struct TimelineView: View {
         return availableYears.first ?? Calendar.current.component(.year, from: Date())
     }
 
+    /// 旅行記録のみ（Trip 検出・年サマリはこちらを使う）
+    private var travelVisits: [Visit] {
+        visits.filter { !$0.isResidence }
+    }
+
     private var filteredVisits: [Visit] {
-        if isAllYearsMode { return Array(visits) }
+        if isAllYearsMode { return travelVisits }
         let calendar = Calendar.current
-        return visits.filter { calendar.component(.year, from: $0.startDate) == currentYear }
+        return travelVisits.filter { calendar.component(.year, from: $0.startDate) == currentYear }
+    }
+
+    /// 選択中の年に「住みはじめた」居住記録（開始月にのみ 1 件出す）
+    private var filteredResidences: [Visit] {
+        let residences = visits.filter(\.isResidence)
+        if isAllYearsMode { return residences }
+        let calendar = Calendar.current
+        return residences.filter { calendar.component(.year, from: $0.startDate) == currentYear }
     }
 
     private var allCompanionNames: [String] {
@@ -125,6 +140,10 @@ struct TimelineView: View {
                     let allTrips = TripDetector.detect(from: Array(visits))
                     if let trip = allTrips.first(where: { $0.visits.contains { $0.id == visit.id } }) {
                         selectedTrip = trip
+                    } else {
+                        // Trip が見つからない場合は編集画面へフォールバック
+                        // (無反応タップを防ぐ)
+                        editingVisit = visit
                     }
                 }
                 yearSwitcher
@@ -402,11 +421,18 @@ struct TimelineView: View {
             TripDetector.detect(from: filteredVisits)
                 .sorted { $0.startDate > $1.startDate }
         )
+        // 居住はスタイル/ムード/移動手段/同行者フィルタの対象外。
+        // フィルタ適用中は旅行の絞り込みに集中させるため居住行を隠す。
+        let residences = hasActiveFilter ? [] : filteredResidences
+        let entries: [TimelineEntry] = (
+            allTrips.map { TimelineEntry.trip($0) } +
+            residences.map { TimelineEntry.residence($0) }
+        ).sorted { $0.date > $1.date }
 
-        if allTrips.isEmpty && hasActiveFilter {
+        if entries.isEmpty && hasActiveFilter {
             filteredEmptyState
         } else {
-            let items = buildTimelineItems(trips: allTrips, calendar: calendar)
+            let items = buildTimelineItems(entries: entries, calendar: calendar)
             VStack(spacing: 0) {
                 ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                     switch item {
@@ -416,14 +442,22 @@ struct TimelineView: View {
                         timelineMonthHeader(month: month)
                     case .trip(let trip, let isLast):
                         timelineTripRow(trip: trip, isLast: isLast)
-                        let nextIsSectionHeader = index + 1 < items.count && items[index + 1].isSectionHeader
-                        if !isLast && !nextIsSectionHeader {
-                            Divider()
-                                .padding(.leading, 42)
-                        }
+                        timelineRowDivider(index: index, items: items, isLast: isLast)
+                    case .residence(let visit, let isLast):
+                        timelineResidenceRow(visit: visit, isLast: isLast)
+                        timelineRowDivider(index: index, items: items, isLast: isLast)
                     }
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func timelineRowDivider(index: Int, items: [TimelineItem], isLast: Bool) -> some View {
+        let nextIsSectionHeader = index + 1 < items.count && items[index + 1].isSectionHeader
+        if !isLast && !nextIsSectionHeader {
+            Divider()
+                .padding(.leading, 42)
         }
     }
 
@@ -451,22 +485,37 @@ struct TimelineView: View {
         case yearHeader(Int)
         case monthHeader(Int)
         case trip(Trip, isLast: Bool)
+        /// 居住の開始月に 1 件だけ差し込む行（期間中の各月には出さない）
+        case residence(Visit, isLast: Bool)
 
         var isSectionHeader: Bool {
             switch self {
             case .yearHeader, .monthHeader: return true
-            case .trip: return false
+            case .trip, .residence: return false
             }
         }
     }
 
-    private func buildTimelineItems(trips: [Trip], calendar: Calendar) -> [TimelineItem] {
+    /// タイムラインに時系列で並べる要素（旅 or 居住開始）
+    private enum TimelineEntry {
+        case trip(Trip)
+        case residence(Visit)
+
+        var date: Date {
+            switch self {
+            case .trip(let trip):       return trip.startDate
+            case .residence(let visit): return visit.startDate
+            }
+        }
+    }
+
+    private func buildTimelineItems(entries: [TimelineEntry], calendar: Calendar) -> [TimelineItem] {
         var items: [TimelineItem] = []
         var lastMonth: Int?
         var lastYear: Int?
-        for (i, trip) in trips.enumerated() {
-            let year = calendar.component(.year, from: trip.startDate)
-            let month = calendar.component(.month, from: trip.startDate)
+        for (i, entry) in entries.enumerated() {
+            let year = calendar.component(.year, from: entry.date)
+            let month = calendar.component(.month, from: entry.date)
 
             if isAllYearsMode && year != lastYear {
                 items.append(.yearHeader(year))
@@ -478,7 +527,12 @@ struct TimelineView: View {
                 items.append(.monthHeader(month))
                 lastMonth = month
             }
-            items.append(.trip(trip, isLast: i == trips.count - 1))
+
+            let isLast = i == entries.count - 1
+            switch entry {
+            case .trip(let trip):       items.append(.trip(trip, isLast: isLast))
+            case .residence(let visit): items.append(.residence(visit, isLast: isLast))
+            }
         }
         return items
     }
@@ -542,6 +596,86 @@ struct TimelineView: View {
 
                 tripRowContent(trip: trip)
                     .padding(.vertical, 10)
+
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.leading, 20)
+        .padding(.trailing, 16)
+        .buttonStyle(.plain)
+    }
+
+    /// 居住の開始月に出す専用行。旅カードとは色・アイコンで区別する。
+    private func timelineResidenceRow(visit: Visit, isLast: Bool) -> some View {
+        Button {
+            editingVisit = visit
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(spacing: 0) {
+                    Rectangle()
+                        .fill(Color.irohaFuji.opacity(0.3))
+                        .frame(width: 2, height: 14)
+                    // 旅カードの塗り circle (10pt) と同じ塗り方式・同じ径にし、
+                    // 色だけで区別する。形状や描き方を変えると差分が目を引くため。
+                    Circle()
+                        .fill(Color.irohaSumika)
+                        .frame(width: 10, height: 10)
+                    Rectangle()
+                        .fill(isLast ? Color.clear : Color.irohaFuji.opacity(0.3))
+                        .frame(width: 2)
+                }
+                .frame(width: 10)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    // 書式は旅カードの県名と完全に揃える (16pt bold serif)。
+                    // サイズやウェイトを変えると差分そのものが目を引くため、
+                    // 区別は「色を紫→金茶に変える」ことだけで行う。
+                    Text("\(visit.prefectureName)に住みはじめた")
+                        .font(.system(size: 16, weight: .bold, design: .serif))
+                        .foregroundColor(.irohaSumikaDk)
+
+                    HStack(spacing: 6) {
+                        Text(visit.residencePeriodText)
+                            .font(.system(size: 12))
+                            .foregroundColor(.irohaSumi3)
+                        // 旅カードの「N泊M日 / 日帰り」バッジと同じ書式
+                        if let duration = visit.residenceDurationText {
+                            Text(duration)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.irohaSumi3)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.irohaWashi2)
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                        }
+                    }
+
+                    if visit.hasLocation || !visit.note.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                if visit.hasLocation {
+                                    HStack(spacing: 2) {
+                                        Text("📍")
+                                            .font(.system(size: 11))
+                                        Text(visit.location)
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.irohaSumi2)
+                                            .lineLimit(1)
+                                    }
+                                    .fixedSize(horizontal: true, vertical: false)
+                                }
+                                if !visit.note.isEmpty {
+                                    Text(visit.note)
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.irohaSumi2)
+                                        .lineLimit(1)
+                                        .fixedSize(horizontal: true, vertical: false)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.vertical, 10)
 
                 Spacer(minLength: 0)
             }
@@ -694,8 +828,9 @@ struct TimelineView: View {
 
     private func shareYearRecap() {
         // 年別シェアでは年でフィルタした visits の VisitStats を渡す
-        // (全期間の stats を渡すと年別マップが全期間表示になる)
-        let stats = VisitStats(visits: filteredVisits)
+        // (全期間の stats を渡すと年別マップが全期間表示になる)。
+        // 居住も含めることで、住んだ県がシェア画像で専用色になる。
+        let stats = VisitStats(visits: filteredVisits + filteredResidences)
         ShareManager.shareMap(stats: stats, year: isAllYearsMode ? nil : currentYear)
     }
 }

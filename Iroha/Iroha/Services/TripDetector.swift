@@ -9,12 +9,19 @@ import Foundation
 ///
 /// Two visits belong to the same trip when they are separated by 3 days or fewer
 /// (based on calendar day difference).
+///
+/// - Important: 居住記録 (`Visit.isResidence`) は入口で除外する。居住は期間が数年に
+///   及ぶため、3 日ルールの隣接判定に混ぜると居住期間中の全旅行が 1 つの巨大な
+///   Trip に併合されてしまう。ここが旅数・移動距離・タイムライン・バッジ 3 種
+///   (`multiPrefTrip` / `longJourney` / `grandTour`) の共通防御点。
 enum TripDetector {
     /// Groups `visits` into `Trip` objects using a ≤3-day interval rule.
-    /// - Parameter visits: An unsorted or sorted list of visits.
+    /// - Parameter visits: An unsorted or sorted list of visits. 居住記録は無視される。
     /// - Returns: An array of `Trip` values in chronological order.
     static func detect(from visits: [Visit]) -> [Trip] {
-        let tripVisits = visits.sorted { $0.startDate < $1.startDate }
+        let tripVisits = visits
+            .filter { !$0.isResidence }
+            .sorted { $0.startDate < $1.startDate }
 
         var groups: [[Visit]] = []
 

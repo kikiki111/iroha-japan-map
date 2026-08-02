@@ -56,6 +56,19 @@ extension Color {
     static let irohaFujiLt    = Color.adaptive(light: "#C8C4F0", dark: "#4A4280")
     static let irohaFuji5     = Color(hex: "#3C3489")
 
+    // 居住カラー（金茶）
+    //
+    // 旅行の紫 (irohaFuji 系) と同じ役割・同じ濃度で、色相だけを変えたペア。
+    // 書式 (サイズ・ウェイト) を旅行と揃えたうえで色だけで区別するため、
+    // `irohaSumikaDk` は `irohaFujiDk` (#534AB7) と同程度の視認性に合わせてある。
+    static let irohaSumika    = Color(hex: "#C9A227")
+    static let irohaSumikaDk  = Color.adaptive(light: "#8A6D10", dark: "#D9BC5E")
+    static let irohaSumikaLt  = Color.adaptive(light: "#F5EEDC", dark: "#413920")
+
+    /// 地図の居住県塗り色（WebView へ渡す Hex）。ライト/ダーク非依存の固定値。
+    /// 未訪問グレー `#DDDAD4` と同程度の明度で、旅行 1 回の薄紫 `#C8C4F0` より弱い。
+    static let residenceHex   = "#E8D9A8"
+
     // 互換性
     static let irohaBackground = irohaWashi
     static let irohaText       = irohaSumi

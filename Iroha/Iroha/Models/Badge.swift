@@ -462,18 +462,24 @@ enum Badge: String, CaseIterable, Identifiable {
     private static let landlockedIDs: Set<Int> = [9, 10, 11, 19, 20, 21, 25, 29]
 
     func isEarned(visits: [Visit], stats: VisitStats) -> Bool {
+        // 「旅の回数・日数」を数える実績からは居住記録を除外する。
+        // 居住は期間が数年に及ぶため、含めると件数が水増しされ、
+        // `nightOwl` (累計 10 泊) は居住 1 件で即達成してしまう。
+        // 写真・メモ・ムード系は居住記録の分も実績に含めてよいので `visits` のまま。
+        let travelVisits = visits.filter { !$0.isResidence }
+
         switch self {
 
         // ── Tier 1: 初心者 ──
 
         case .firstVisit:
-            return !visits.isEmpty
+            return !travelVisits.isEmpty
 
         case .tenVisits:
-            return visits.count >= 10
+            return travelVisits.count >= 10
 
         case .fiftyVisits:
-            return visits.count >= 50
+            return travelVisits.count >= 50
 
         case .nationalConquest:
             return stats.visitedCount >= 47
@@ -483,7 +489,7 @@ enum Badge: String, CaseIterable, Identifiable {
 
         case .fourSeasons:
             let calendar = Calendar.current
-            let months = Set(visits.map { calendar.component(.month, from: $0.startDate) })
+            let months = Set(travelVisits.map { calendar.component(.month, from: $0.startDate) })
             let spring = months.contains(where: { (3...5).contains($0) })
             let summer = months.contains(where: { (6...8).contains($0) })
             let autumn = months.contains(where: { (9...11).contains($0) })
@@ -513,10 +519,10 @@ enum Badge: String, CaseIterable, Identifiable {
         // ── Tier 2: 中級者 ──
 
         case .thirtyVisits:
-            return visits.count >= 30
+            return travelVisits.count >= 30
 
         case .hundredVisits:
-            return visits.count >= 100
+            return travelVisits.count >= 100
 
         case .twentyPrefectures:
             return stats.visitedCount >= 20
@@ -530,7 +536,7 @@ enum Badge: String, CaseIterable, Identifiable {
 
         case .samePrefFourSeasons:
             let calendar = Calendar.current
-            let grouped = Dictionary(grouping: visits, by: \.prefectureName)
+            let grouped = Dictionary(grouping: travelVisits, by: \.prefectureName)
             return grouped.values.contains { prefVisits in
                 let months = Set(prefVisits.map { calendar.component(.month, from: $0.startDate) })
                 let spring = months.contains(where: { (3...5).contains($0) })
@@ -567,13 +573,13 @@ enum Badge: String, CaseIterable, Identifiable {
         // ── Tier 3: 上級者 ──
 
         case .twoHundredVisits:
-            return visits.count >= 200
+            return travelVisits.count >= 200
 
         case .thirtyFivePrefectures:
             return stats.visitedCount >= 35
 
         case .repeatVisitor:
-            let grouped = Dictionary(grouping: visits, by: \.prefectureName)
+            let grouped = Dictionary(grouping: travelVisits, by: \.prefectureName)
             let repeats = grouped.values.filter { $0.count >= 3 }
             return repeats.count >= 5
 
@@ -590,8 +596,9 @@ enum Badge: String, CaseIterable, Identifiable {
             return Region.allCases.filter { stats.isRegionConquered($0) }.count >= 5
 
         case .nightOwl:
+            // 居住を含めると 1 件 (数年) で即達成してしまうため travelVisits 必須
             let calendar = Calendar.current
-            let totalNights = visits.compactMap { visit -> Int? in
+            let totalNights = travelVisits.compactMap { visit -> Int? in
                 let start = calendar.startOfDay(for: visit.startDate)
                 let end = calendar.startOfDay(for: visit.effectiveEndDate)
                 let nights = calendar.dateComponents([.day], from: start, to: end).day ?? 0
@@ -627,14 +634,14 @@ enum Badge: String, CaseIterable, Identifiable {
         // ── Tier 4: 達人 ──
 
         case .fiveHundredVisits:
-            return visits.count >= 500
+            return travelVisits.count >= 500
 
         case .allFortySevenAgain:
             return Prefecture.all.allSatisfy { stats.count(for: $0) >= 2 }
 
         case .thousandDays:
-            guard let earliest = visits.map(\.startDate).min(),
-                  let latest = visits.map(\.startDate).max() else { return false }
+            guard let earliest = travelVisits.map(\.startDate).min(),
+                  let latest = travelVisits.map(\.startDate).max() else { return false }
             let days = Calendar.current.dateComponents([.day], from: earliest, to: latest).day ?? 0
             return days >= 1000
 
@@ -647,7 +654,7 @@ enum Badge: String, CaseIterable, Identifiable {
 
         case .yearRoundTraveler:
             let calendar = Calendar.current
-            let months = Set(visits.map { calendar.component(.month, from: $0.startDate) })
+            let months = Set(travelVisits.map { calendar.component(.month, from: $0.startDate) })
             return months.count >= 12
 
         case .slowTraveler:

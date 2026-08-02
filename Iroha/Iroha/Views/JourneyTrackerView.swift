@@ -33,9 +33,31 @@ struct JourneyTrackerView: View {
         return Set(visits.map { calendar.component(.year, from: $0.startDate) }).sorted(by: >)
     }
 
+    /// 旅行記録のみ（旅数・距離・最遠地などの集計はすべてこちら起点）
+    private var travelVisits: [Visit] {
+        visits.filter { !$0.isResidence }
+    }
+
     private var filteredVisits: [Visit] {
-        if selectedYear == 0 { return Array(visits) }
-        return visits.filter { Calendar.current.component(.year, from: $0.startDate) == selectedYear }
+        if selectedYear == 0 { return travelVisits }
+        return travelVisits.filter { Calendar.current.component(.year, from: $0.startDate) == selectedYear }
+    }
+
+    /// 選択中の期間に住みはじめた県の数（「すべて」選択時は全期間）
+    private var filteredResidenceCount: Int {
+        let residences = visits.filter(\.isResidence)
+        if selectedYear == 0 {
+            return Set(residences.map(\.prefectureID)).count
+        }
+        let inYear = residences.filter {
+            Calendar.current.component(.year, from: $0.startDate) == selectedYear
+        }
+        return Set(inYear.map(\.prefectureID)).count
+    }
+
+    /// 居住したことのある都道府県 ID（地方別リストの家アイコン用、期間フィルタなし）
+    private var residencePrefectureIDs: Set<Int> {
+        Set(visits.filter(\.isResidence).map(\.prefectureID))
     }
 
     private var filteredTotalVisits: Int { filteredVisits.count }
@@ -285,10 +307,14 @@ struct JourneyTrackerView: View {
     }
 
     private var filteredConqueredRegionCount: Int {
+        // 居住県も「訪れた」に含める（地図・統計バーと同じ扱い）
+        let residenceIDs = residencePrefectureIDs
         let visitedNames = Set(filteredVisits.map(\.prefectureName))
         return Region.allCases.filter { region in
             let group = prefectures.filter { $0.region == region }
-            return !group.isEmpty && group.allSatisfy { visitedNames.contains($0.name) }
+            return !group.isEmpty && group.allSatisfy {
+                visitedNames.contains($0.name) || residenceIDs.contains($0.id)
+            }
         }.count
     }
 
@@ -636,6 +662,13 @@ struct JourneyTrackerView: View {
             profileColumn(value: filteredTotalVisits, label: "記録数")
             Divider().frame(height: 40)
             profileColumn(value: filteredTripCount, label: "旅数")
+            // 居住が 1 件もないユーザーには列を出さない（従来の 3 列のまま）
+            if filteredResidenceCount > 0 {
+                Divider().frame(height: 40)
+                // 他の列と同じ書式のまま、色だけ金茶にして区別する
+                profileColumn(value: filteredResidenceCount, label: "住んだ県",
+                              valueColor: .irohaSumikaDk)
+            }
             Divider().frame(height: 40)
             profileColumn(value: filteredConqueredRegionCount, label: "地方制覇")
         }
@@ -650,11 +683,12 @@ struct JourneyTrackerView: View {
         .padding(.top, 10)
     }
 
-    private func profileColumn(value: Int, label: String) -> some View {
+    private func profileColumn(value: Int, label: String,
+                               valueColor: Color = .irohaFujiDk) -> some View {
         VStack(spacing: 3) {
             Text(verbatim: "\(value)")
                 .font(.system(size: 22, weight: .light, design: .serif))
-                .foregroundColor(.irohaFujiDk)
+                .foregroundColor(valueColor)
             Text(label)
                 .font(.system(size: 11))
                 .foregroundColor(.irohaSumi3)
@@ -675,22 +709,33 @@ struct JourneyTrackerView: View {
 
             VStack(spacing: 0) {
                 ForEach(Region.allCases) { region in
+                    let residenceIDs = residencePrefectureIDs
                     let group = prefectures.filter { $0.region == region }
                     let total = group.count
-                    let visitedInPeriod = group.filter { filteredVisitCount(for: $0) > 0 }.count
+                    // 居住県も「その地方を訪れた」に含める（地図・統計バーと同じ扱い）
+                    let visitedInPeriod = group.filter {
+                        filteredVisitCount(for: $0) > 0 || residenceIDs.contains($0.id)
+                    }.count
                     let ratio = total > 0 ? Double(visitedInPeriod) / Double(total) : 0.0
 
                     DisclosureGroup {
                         VStack(spacing: 0) {
                             ForEach(group) { pref in
                                 let count = filteredVisitCount(for: pref)
+                                let isResidence = residenceIDs.contains(pref.id)
                                 HStack(spacing: 8) {
-                                    Image(systemName: count > 0 ? "checkmark.circle.fill" : "circle")
+                                    Image(systemName: (count > 0 || isResidence) ? "checkmark.circle.fill" : "circle")
                                         .font(.system(size: 13))
-                                        .foregroundColor(count > 0 ? .irohaFuji : .irohaSumi3.opacity(0.4))
+                                        .foregroundColor((count > 0 || isResidence) ? .irohaFuji : .irohaSumi3.opacity(0.4))
                                     Text(pref.name)
                                         .font(.system(size: 13))
                                         .foregroundColor(.irohaSumi)
+                                    if isResidence {
+                                        Image(systemName: "house.fill")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.irohaSumika)
+                                            .accessibilityLabel("住んだ県")
+                                    }
                                     Spacer()
                                     if count > 0 {
                                         Text(verbatim: "\(count)回")

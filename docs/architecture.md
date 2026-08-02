@@ -52,13 +52,18 @@ ContentView
 
 ### Visit（SwiftData @Model — CloudKit 同期対象 / Phase 6 で有効化）
 - prefectureName, prefectureID（Prefecture.id への参照キー）
-- startDate, endDate, note
-- tag: VisitTag?（日帰り / 宿泊 / 居住）
+- kind: VisitKind?（旅行 / 居住。nil = 旧データ → effectiveKind で .travel に倒す）
+- startDate（旅行の開始日 / 居住の開始日）, endDate（**旅行専用**、nil = 日帰り）, note
+- residenceEndDate: Date?（**居住専用**の終了日）, isResidenceOngoing: Bool（現在も居住中）
+  - endDate と residenceEndDate を分けているのは、nil の意味が「日帰り」と「継続中」で衝突するため
+- tag: VisitTag?（一人旅 / 家族旅行 / 恋人旅行 / 友達旅行。kind と直交する軸で、居住でも選べる）
 - mood: VisitMood?（楽 / 癒 / 感 / 驚 / 懐 / 静）
 - transports, tripName, companions, location, locationLatitude, locationLongitude
 - photos: [VisitPhoto]?（@Relationship, cascade delete, optional 必須）
 - 旧 photoFilenames / photoThumbnails / photoFilename / photoThumbnail（PhotoMigration 完了確認まで併存）
 - 互換ヘルパー: totalPhotoCount, sortedPhotoThumbnails, sortedPhotoFilenames, sortedPhotos
+- 居住ヘルパー: effectiveKind, isResidence, residencePeriodText, residenceDurationText
+- 新フィールド追加時は CloudKit 互換のため **optional か default 値付き** が必須（`kind` は optional、`isResidenceOngoing` は default false）。lightweight migration で自動処理されるため専用 Migration は不要
 
 ### VisitPhoto（SwiftData @Model — CloudKit 同期対象 / Phase 6 で有効化）
 - id: UUID
@@ -71,7 +76,10 @@ ContentView
 
 ### VisitStats（派生集計 ヘルパー）
 - visits 群を引数に取り、prefectureID → count の辞書を生成
-- API: count(for:), isVisited(_:), isAllVisited, visitedPrefectures, visitsByRegion(), isRegionConquered(_:), color(for:), colorHex(for:), signature
+- **居住は count に加算しない**（5 年住んだのを「1 回訪問」としない）が、`visitedIDs` には含める（住んだ県を未訪問扱いにしない）
+- API: count(for:), isVisited(_:), isResidence(_:), residenceCount, isAllVisited, visitedPrefectures, visitsByRegion(), isRegionConquered(_:), color(for:), colorHex(for:), signature
+- `colorHex(for:)` の優先順位は **旅行 > 居住**。淡い金茶 `#E8D9A8` を返すのは「居住あり かつ 旅行 0 回」の県のみで、旅行があれば訪問回数どおりの紫になる（地図から旅行回数を読めるようにするため）
+- `signature` には residenceIDs も混ぜる（居住のみの変更で onChange が発火しなくなるため）
 - View 階層で 1 度作ってサブビューに渡す
 
 ### Trip（非永続化 — TripDetector で動的生成）
@@ -81,8 +89,14 @@ ContentView
 ### Region（enum）
 hokkaido, tohoku, kanto, chubu, kinki, chugoku, shikoku, kyushu
 
-### VisitTag（enum）
-none, dayTrip, stay, lived
+### VisitKind（enum）
+travel（旅行）, residence（居住）
+- `.none` を持たない 2 値。未設定は `Visit.kind == nil`（旧データ）で表し、`effectiveKind` が `.travel` を返す
+
+### VisitTag（enum — 旅行スタイル）
+none, solo（一人旅）, family（家族旅行）, couple（恋人旅行）, friends（友達旅行）
+- legacy（ピッカー非表示、データ互換のため保持）: dayTrip, stay, lived
+- 選択可能なものは `selectableCases` の 4 種のみ
 
 ### VisitMood（enum — 伝統色ベース）
 none, tanoshi(楽/桜), iyashi(癒/若草), kandou(感/藤), odoroki(驚/山吹), natsukashi(懐/茜), shizuka(静/浅葱)
@@ -101,7 +115,10 @@ Prefecture（SwiftData）←→ MapViewModel → JapanMapView（WKWebView）
 6. シート閉じ後に初訪問アニメーション（animateFill）を発火
 
 ## 旅ルート自動検出アルゴリズム（TripDetector）
-1. 全 Visit を startDate でソート
+0. **居住記録（`isResidence`）を入口で除外**
+   （居住は期間が数年に及ぶため、3 日ルールに混ぜると居住期間中の全旅行が 1 つの巨大 Trip に併合される。
+   旅数・移動距離・タイムライン・バッジ 3 種の共通防御点）
+1. 残った Visit を startDate でソート
 2. 前の Visit の effectiveEndDate から次の Visit の startDate が 3日以内 → 同じ旅行グループ
 3. グループを Trip オブジェクトに変換（FNV-1a ハッシュで確定的 UUID 生成）
 4. Trip を月別にグルーピングして TimelineView に表示

@@ -14,11 +14,19 @@ final class Visit {
     /// 訪問先の参照キーとして保持する。既存 Visit は `VisitPrefectureMigration` で
     /// `prefectureName` から backfill される。
     var prefectureID: Int = 0
-    /// 旧 `date` 属性からのライトウェイトマイグレーション対応
+    /// 記録種別 (旅行 / 居住)。nil = 旧データ、`effectiveKind` で `.travel` に倒す。
+    var kind: VisitKind?
+    /// 旧 `date` 属性からのライトウェイトマイグレーション対応。
+    /// 居住 (`kind == .residence`) の場合は居住開始日を表す。
     @Attribute(originalName: "date")
     var startDate: Date = Date()
-    /// nil = 日帰り（startDate と同日）
+    /// nil = 日帰り（startDate と同日）。**旅行専用**。
+    /// 居住の終了日は `residenceEndDate` を使う (nil の意味が衝突するため分離)。
     var endDate: Date?
+    /// 居住の終了日。`isResidenceOngoing == true` のときは nil。
+    var residenceEndDate: Date?
+    /// 現在も居住中か。true なら `residenceEndDate` は nil。
+    var isResidenceOngoing: Bool = false
     var note: String = ""
     /// 訪問タグ（日帰り / 宿泊 / 居住）
     var tag: VisitTag?
@@ -55,14 +63,20 @@ final class Visit {
 
     init(prefectureName: String, prefectureID: Int = 0,
          startDate: Date, endDate: Date? = nil,
-         note: String = "", tag: VisitTag = .none) {
-        self.prefectureName = prefectureName
-        self.prefectureID   = prefectureID
-        self.startDate      = startDate
-        self.endDate        = endDate
-        self.note           = note
-        self.tag            = tag
-        self.photoFilename  = nil
+         note: String = "", tag: VisitTag = .none,
+         kind: VisitKind = .travel,
+         residenceEndDate: Date? = nil,
+         isResidenceOngoing: Bool = false) {
+        self.prefectureName     = prefectureName
+        self.prefectureID       = prefectureID
+        self.startDate          = startDate
+        self.endDate            = endDate
+        self.note               = note
+        self.tag                = tag
+        self.kind               = kind
+        self.residenceEndDate   = residenceEndDate
+        self.isResidenceOngoing = isResidenceOngoing
+        self.photoFilename      = nil
     }
 
     var photoThumbnails: [Data] {
@@ -73,6 +87,18 @@ final class Visit {
         set {
             photoThumbnailsData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue)
         }
+    }
+
+    /// 記録種別の安全なアクセス（nil → .travel）。
+    /// 旧データは `kind` を持たないため、すべて旅行として扱う。
+    var effectiveKind: VisitKind {
+        guard !isDeleted else { return .travel }
+        return kind ?? .travel
+    }
+
+    /// 居住記録かどうか。集計・旅検出の除外判定に使う。
+    var isResidence: Bool {
+        effectiveKind == .residence
     }
 
     /// タグの安全なアクセス（nil → .none）
@@ -95,6 +121,37 @@ final class Visit {
     var effectiveEndDate: Date {
         guard !isDeleted else { return startDate }
         return endDate ?? startDate
+    }
+
+    // MARK: - Residence helpers
+
+    /// 居住期間の表示テキスト。例: "2015年4月 〜 2019年3月" / "2019年4月 〜 現在"
+    var residencePeriodText: String {
+        guard !isDeleted else { return "" }
+        let start = Self.residenceMonthFormat(startDate)
+        if isResidenceOngoing || residenceEndDate == nil {
+            return "\(start) 〜 現在"
+        }
+        guard let end = residenceEndDate else { return "\(start) 〜 現在" }
+        return "\(start) 〜 \(Self.residenceMonthFormat(end))"
+    }
+
+    /// 居住期間の長さ表示。例: "4年" / "8か月"。1か月未満は nil。
+    var residenceDurationText: String? {
+        guard !isDeleted, isResidence else { return nil }
+        let end = isResidenceOngoing ? Date() : (residenceEndDate ?? Date())
+        guard end > startDate else { return nil }
+        let parts = Calendar.current.dateComponents([.year, .month], from: startDate, to: end)
+        let years = parts.year ?? 0
+        let months = parts.month ?? 0
+        if years > 0 {
+            return months > 0 ? "\(years)年\(months)か月" : "\(years)年"
+        }
+        return months > 0 ? "\(months)か月" : nil
+    }
+
+    private static func residenceMonthFormat(_ date: Date) -> String {
+        date.formatted(.dateTime.year().month().locale(Locale(identifier: "ja_JP")))
     }
 
     /// レガシー単一写真 + 新複数写真を統合
