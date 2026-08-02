@@ -56,7 +56,7 @@ ContentView
 - startDate（旅行の開始日 / 居住の開始日）, endDate（**旅行専用**、nil = 日帰り）, note
 - residenceEndDate: Date?（**居住専用**の終了日）, isResidenceOngoing: Bool（現在も居住中）
   - endDate と residenceEndDate を分けているのは、nil の意味が「日帰り」と「継続中」で衝突するため
-- tag: VisitTag?（一人旅 / 家族旅行 / 恋人旅行 / 友達旅行。kind と直交する軸で、居住でも選べる）
+- tag: String?（旅行スタイル ID。kind と直交する軸で、居住でも選べる。プリセットは `TravelStylePreset.rawValue`、ユーザー定義は `"u:<UUID>"`。未選択は nil で、レガシー文字列 `"none"` も未選択として扱う）
 - mood: VisitMood?（楽 / 癒 / 感 / 驚 / 懐 / 静）
 - transports, tripName, companions, location, locationLatitude, locationLongitude
 - photos: [VisitPhoto]?（@Relationship, cascade delete, optional 必須）
@@ -93,10 +93,22 @@ hokkaido, tohoku, kanto, chubu, kinki, chugoku, shikoku, kyushu
 travel（旅行）, residence（居住）
 - `.none` を持たない 2 値。未設定は `Visit.kind == nil`（旧データ）で表し、`effectiveKind` が `.travel` を返す
 
-### VisitTag（enum — 旅行スタイル）
-none, solo（一人旅）, family（家族旅行）, couple（恋人旅行）, friends（友達旅行）
-- legacy（ピッカー非表示、データ互換のため保持）: dayTrip, stay, lived
-- 選択可能なものは `selectableCases` の 4 種のみ
+### 旅行スタイル（プリセット + ユーザー定義）
+
+固定 enum ではなく、静的プリセットと永続レコードを 1 つの値型に投影する構成。
+
+| 型 | 役割 |
+|---|---|
+| `TravelStylePreset`（enum） | アプリ標準の 5 種: solo（一人旅）, family（家族旅行）, couple（恋人旅行）, friends（友達旅行）, other（その他）。legacy 3 種（dayTrip, stay, lived）は表示専用で選択肢に出さない |
+| `TravelStyleRecord`（@Model） | ユーザーが追加したカスタム行と、プリセットを非表示にしたときだけ作るオーバーレイ行。`isHidden` はどちらの行でも使い、カスタムスタイルの表示・非表示も同じフラグで表す |
+| `TravelStyle`（struct） | 上記 2 つを投影した UI 用の統一型。`id` / `name` / `iconName` / `palette` |
+| `TravelStyleCatalog`（struct） | プリセット + カスタムを統合した参照テーブル。`TravelStyleCatalogProvider` が `@Query` の単一オーナーとなり Environment で配る |
+| `TravelStylePalette`（enum） | 伝統色ベースの配色。ユーザー選択可能な 12 色を含む |
+| `TravelStyleStore`（enum） | 書き込み専用 CRUD。読み取りは `@Query` + カタログが担う |
+
+- **プリセットは SwiftData に seed しない。** `Prefecture` と同じ理由（複数端末での seed 重複回避）
+- ユーザー定義は CloudKit 同期する。`Visit.tag` が同期対象である以上、定義だけ端末ローカルに置くと他端末でバッジが消えるため
+- カスタムスタイルの削除時は、該当 `Visit.tag` を nil にしてから 1 トランザクションで消す（記録自体は削除しない）
 
 ### VisitMood（enum — 伝統色ベース）
 none, tanoshi(楽/桜), iyashi(癒/若草), kandou(感/藤), odoroki(驚/山吹), natsukashi(懐/茜), shizuka(静/浅葱)
@@ -141,7 +153,8 @@ Prefecture（SwiftData）←→ MapViewModel → JapanMapView（WKWebView）
 
 ## CloudKit 同期（Phase 6 で有効化予定）
 - ModelContainer の `cloudKitDatabase: .private("iCloud.com.qumo.Iroha")` で有効化
-- Schema は [Visit.self, VisitPhoto.self]（Prefecture は static struct、同期対象外）
+- Schema は [Visit.self, VisitPhoto.self, TravelStyleRecord.self]（Prefecture と旅行スタイルのプリセットは静的テーブル、同期対象外）
+- `TravelStyleRecord` は新しい CKRecord タイプなので、**リリース前に CloudKit Dashboard で Production へスキーマをデプロイする**
 - ユーザの ON/OFF 設定: UserDefaults `cloud_sync_enabled`
 - 初回起動時: CloudSyncOnboardingView で選択
 - ON/OFF 切替は ModelContainer の起動時固定のため、変更後はアプリ再起動を要求

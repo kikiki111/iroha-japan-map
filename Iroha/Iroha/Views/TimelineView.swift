@@ -13,6 +13,7 @@ struct TimelineView: View {
     var mapViewModel: MapViewModel
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.travelStyleCatalog) private var styleCatalog
     @Query(sort: \Visit.startDate, order: .reverse) private var visits: [Visit]
     private var prefectures: [Prefecture] { Prefecture.all }
 
@@ -20,7 +21,7 @@ struct TimelineView: View {
     @State private var showAddVisit = false
     @State private var editingVisit: Visit?
     @State private var selectedTrip: Trip?
-    @State private var filterTag: VisitTag? = nil
+    @State private var filterStyleID: String? = nil
     @State private var filterMood: VisitMood? = nil
     @State private var filterTransports: Set<VisitTransport> = []
     @State private var filterCompanions: Set<String> = []
@@ -64,13 +65,13 @@ struct TimelineView: View {
     }
 
     private var hasActiveFilter: Bool {
-        filterTag != nil || filterMood != nil || !filterTransports.isEmpty || !filterCompanions.isEmpty
+        filterStyleID != nil || filterMood != nil || !filterTransports.isEmpty || !filterCompanions.isEmpty
     }
 
     private func applyTripFilters(_ trips: [Trip]) -> [Trip] {
         trips.filter { trip in
-            if let tag = filterTag,
-               !trip.visits.contains(where: { $0.effectiveTag == tag }) { return false }
+            if let styleID = filterStyleID,
+               !trip.visits.contains(where: { $0.effectiveStyleID == styleID }) { return false }
             if let mood = filterMood,
                !trip.visits.contains(where: { $0.effectiveMood == mood }) { return false }
             if !filterTransports.isEmpty {
@@ -127,6 +128,12 @@ struct TimelineView: View {
                     }
                 }
                 .environment(\.locale, Locale(identifier: "ja_JP"))
+            }
+            .onChange(of: styleCatalog.selectable) { _, newValue in
+                // 設定画面で絞り込み中のスタイルが削除・非表示になったらフィルタを解除する
+                if let id = filterStyleID, !newValue.contains(where: { $0.id == id }) {
+                    filterStyleID = nil
+                }
             }
         }
     }
@@ -212,7 +219,7 @@ struct TimelineView: View {
                 if hasActiveFilter {
                     Button {
                         withAnimation(.easeInOut(duration: 0.2)) {
-                            filterTag = nil
+                            filterStyleID = nil
                             filterMood = nil
                             filterTransports.removeAll()
                             filterCompanions.removeAll()
@@ -240,19 +247,19 @@ struct TimelineView: View {
 
     private var tagFilterChip: some View {
         Menu {
-            Button("すべて") { filterTag = nil }
-            ForEach(VisitTag.selectableCases, id: \.rawValue) { tag in
+            Button("すべて") { filterStyleID = nil }
+            ForEach(styleCatalog.selectable) { style in
                 Button {
-                    filterTag = tag
+                    filterStyleID = style.id
                 } label: {
-                    Label(tag.displayName, systemImage: tag.iconName)
+                    Label(style.name, systemImage: style.iconName)
                 }
             }
         } label: {
             filterChipLabel(
                 label: "スタイル",
-                value: filterTag?.displayName,
-                isActive: filterTag != nil
+                value: styleCatalog.style(for: filterStyleID)?.name,
+                isActive: filterStyleID != nil
             )
         }
     }
@@ -468,7 +475,7 @@ struct TimelineView: View {
                 .foregroundColor(.irohaSumi3)
             Button("条件をクリア") {
                 withAnimation(.easeInOut(duration: 0.2)) {
-                    filterTag = nil
+                    filterStyleID = nil
                     filterMood = nil
                     filterTransports.removeAll()
                     filterCompanions.removeAll()
@@ -707,9 +714,7 @@ struct TimelineView: View {
                     Text(visit.prefectureName)
                         .font(.system(size: 16, weight: .bold))
                         .foregroundColor(.irohaFujiDk)
-                    if visit.effectiveTag != .none {
-                        VisitTagBadge(tag: visit.effectiveTag)
-                    }
+                    VisitTagBadge(style: styleCatalog.style(for: visit))
                     if visit.effectiveMood != .none {
                         VisitMoodBadge(mood: visit.effectiveMood)
                     }
@@ -886,6 +891,7 @@ struct TripDetailSheet: View {
     var onEditVisit: ((Visit) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.travelStyleCatalog) private var styleCatalog
     @State private var fullscreenSelection: PhotoFullscreenSelection?
 
     private var nights: Int {
@@ -1048,9 +1054,7 @@ struct TripDetailSheet: View {
                 HStack(spacing: 6) {
                     Text(visit.prefectureName)
                         .font(.system(size: 16, weight: .bold))
-                    if visit.effectiveTag != .none {
-                        VisitTagBadge(tag: visit.effectiveTag)
-                    }
+                    VisitTagBadge(style: styleCatalog.style(for: visit))
                     if visit.effectiveMood != .none {
                         VisitMoodBadge(mood: visit.effectiveMood)
                     }

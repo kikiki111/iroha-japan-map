@@ -14,6 +14,7 @@ struct VisitFormView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.travelStyleCatalog) private var styleCatalog
 
     @State private var selectedPrefectureName = ""
     @State private var selectedKind: VisitKind = .travel
@@ -22,7 +23,9 @@ struct VisitFormView: View {
     /// 居住の終了日。`isOngoingResidence` が true のときは保存対象外。
     @State private var residenceEndDate = Date()
     @State private var isOngoingResidence = false
-    @State private var selectedTag: VisitTag = .none
+    /// 選択中の旅行スタイル ID。カタログで解決できない ID（他端末で作成し未同期など）でも
+    /// 値は捨てずに保持する。同期完了後に自動で表示が戻る。
+    @State private var selectedStyleID: String?
     @State private var selectedMood: VisitMood = .none
     @State private var selectedTransports: Set<VisitTransport> = []
     @State private var memo = ""
@@ -399,13 +402,16 @@ struct VisitFormView: View {
         }
     }
 
+    /// 選択中スタイルの実体。ID が解決できない場合は nil（表示は「未選択」）。
+    private var selectedStyle: TravelStyle? { styleCatalog.style(for: selectedStyleID) }
+
     private var tagRow: some View {
         VStack(spacing: 0) {
             rowHeader(
                 icon: "tag",
                 label: "旅行スタイル",
-                value: selectedTag == .none ? "未選択" : selectedTag.displayName,
-                valueColor: selectedTag == .none ? .irohaSumi3 : selectedTag.foregroundColor,
+                value: selectedStyle?.name ?? "未選択",
+                valueColor: selectedStyle?.foregroundColor ?? .irohaSumi3,
                 section: .tag
             )
 
@@ -1020,25 +1026,33 @@ struct VisitFormView: View {
     }
 
     private var tagPickerContent: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
-            ForEach(VisitTag.selectableCases, id: \.rawValue) { tag in
+        // 編集中の記録が非表示にされたプリセットを使っている場合、そのスタイルだけ
+        // 選択肢に残す。保存し直しただけでスタイルが外れるのを防ぐ。
+        let styles = styleCatalog.selectableIncluding(selectedStyle)
+
+        return LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+            ForEach(styles) { style in
+                let isSelected = selectedStyleID == style.id
                 Button {
-                    selectedTag = selectedTag == tag ? .none : tag
+                    // 再タップで選択解除
+                    selectedStyleID = isSelected ? nil : style.id
                 } label: {
                     HStack(spacing: 6) {
-                        Image(systemName: tag.iconName)
+                        Image(systemName: style.iconName)
                             .font(.system(size: 13))
-                        Text(tag.displayName)
-                            .font(.system(size: 14, weight: selectedTag == tag ? .bold : .medium))
+                        Text(style.name)
+                            .font(.system(size: 14, weight: isSelected ? .bold : .medium))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
                     }
-                    .foregroundColor(selectedTag == tag ? tag.foregroundColor : .irohaSumi3)
+                    .foregroundColor(isSelected ? style.foregroundColor : .irohaSumi3)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
-                    .background(selectedTag == tag ? tag.backgroundColor : Color.irohaWashi2)
+                    .background(isSelected ? style.backgroundColor : Color.irohaWashi2)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
-                            .stroke(selectedTag == tag ? tag.foregroundColor.opacity(0.3) : Color.irohaWashi3, lineWidth: 0.5)
+                            .stroke(isSelected ? style.foregroundColor.opacity(0.3) : Color.irohaWashi3, lineWidth: 0.5)
                     )
                 }
             }
@@ -1256,7 +1270,7 @@ struct VisitFormView: View {
             isOngoingResidence = visit.isResidenceOngoing
             // 終了日なし (継続中 or 未設定) の場合は開始日を初期値にする
             residenceEndDate = visit.residenceEndDate ?? visit.startDate
-            selectedTag = visit.effectiveTag
+            selectedStyleID = visit.effectiveStyleID
             selectedMood = visit.effectiveMood
             selectedTransports = Set(visit.effectiveTransports)
             memo = visit.note
@@ -1330,7 +1344,7 @@ struct VisitFormView: View {
         // 旅行スタイル・移動手段・ムード・旅行名は旅行専用。
         // 居住では入力欄を出さないので保存もしない (種別を切り替えたときに
         // 見えていない値が残らないよう、明示的にクリアする)。
-        let computedTag: VisitTag = isResidenceMode ? .none : selectedTag
+        let computedTag: String? = isResidenceMode ? nil : selectedStyleID
         let computedMood: VisitMood = isResidenceMode ? .none : selectedMood
         let computedTransports = isResidenceMode ? [] : selectedTransports.map(\.rawValue)
         let computedTripName = isResidenceMode ? "" : tripName

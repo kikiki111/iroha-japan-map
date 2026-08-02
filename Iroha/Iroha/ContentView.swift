@@ -24,28 +24,32 @@ struct ContentView: View {
     }
 
     var body: some View {
-        ZStack {
-            TabView {
-                MapTabView(mapViewModel: mapViewModel)
-                    .tabItem {
-                        Label("地図", systemImage: "globe.asia.australia")
-                    }
+        // 旅行スタイルのカタログを全画面へ配る。@Query の単一オーナーなので
+        // ローカル保存も CloudKit のリモート反映もここ経由で再描画に載る。
+        TravelStyleCatalogProvider {
+            ZStack {
+                TabView {
+                    MapTabView(mapViewModel: mapViewModel)
+                        .tabItem {
+                            Label("地図", systemImage: "globe.asia.australia")
+                        }
 
-                TimelineView(mapViewModel: mapViewModel)
-                    .tabItem {
-                        Label("旅の軌跡", systemImage: "book")
-                    }
+                    TimelineView(mapViewModel: mapViewModel)
+                        .tabItem {
+                            Label("旅の軌跡", systemImage: "book")
+                        }
 
-                JourneyTrackerView()
-                    .tabItem {
-                        Label("記録", systemImage: "flag.fill")
-                    }
-            }
-            .tint(Color.irohaFujiDk)
+                    JourneyTrackerView()
+                        .tabItem {
+                            Label("記録", systemImage: "flag.fill")
+                        }
+                }
+                .tint(Color.irohaFujiDk)
 
-            if !onboardingDone {
-                OnboardingView()
-                    .transition(.opacity)
+                if !onboardingDone {
+                    OnboardingView()
+                        .transition(.opacity)
+                }
             }
         }
         .environment(cloudSyncStatus)

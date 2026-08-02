@@ -13,6 +13,7 @@ struct PrefectureDetailSheet: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.travelStyleCatalog) private var styleCatalog
 
     @Query(sort: \Visit.startDate, order: .reverse) private var allVisits: [Visit]
 
@@ -437,9 +438,7 @@ struct PrefectureDetailSheet: View {
                     Text(visit.startDate.formatted(.dateTime.year().month().day().locale(Locale(identifier: "ja_JP"))))
                         .font(.system(size: 15, weight: .bold))
 
-                    if visit.effectiveTag != .none {
-                        VisitTagBadge(tag: visit.effectiveTag)
-                    }
+                    VisitTagBadge(style: styleCatalog.style(for: visit))
                     if visit.effectiveMood != .none {
                         VisitMoodBadge(mood: visit.effectiveMood)
                     }

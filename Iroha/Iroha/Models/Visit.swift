@@ -28,8 +28,15 @@ final class Visit {
     /// 現在も居住中か。true なら `residenceEndDate` は nil。
     var isResidenceOngoing: Bool = false
     var note: String = ""
-    /// 訪問タグ（日帰り / 宿泊 / 居住）
-    var tag: VisitTag?
+    /// 旅行スタイル ID。
+    /// - プリセット: `TravelStylePreset.rawValue` ("solo" / "business" …)
+    /// - ユーザー定義: `"u:" + UUID.uuidString`
+    /// - 未選択: nil。レガシー互換で文字列 `"none"` も未選択として扱う
+    ///
+    /// - Important: SwiftData 上のカラムは旧 `VisitTag?` と同一の `ZTAG VARCHAR`
+    ///   (rawValue 生格納) なので、プロパティ名を変えない限りマイグレーションは不要。
+    ///   `@Attribute(originalName:)` は名前も型表現も変わらないため付けない。
+    var tag: String?
     /// 写真ファイル名（Documents/Photos/ に保存）
     var photoFilename: String?
     /// サムネイル画像データ（リスト表示用、300px JPEG）
@@ -63,7 +70,7 @@ final class Visit {
 
     init(prefectureName: String, prefectureID: Int = 0,
          startDate: Date, endDate: Date? = nil,
-         note: String = "", tag: VisitTag = .none,
+         note: String = "", tag: String? = nil,
          kind: VisitKind = .travel,
          residenceEndDate: Date? = nil,
          isResidenceOngoing: Bool = false) {
@@ -101,10 +108,11 @@ final class Visit {
         effectiveKind == .residence
     }
 
-    /// タグの安全なアクセス（nil → .none）
-    var effectiveTag: VisitTag {
-        guard !isDeleted else { return .none }
-        return tag ?? .none
+    /// スタイル ID の安全なアクセス。未選択（nil / レガシー `"none"`）は nil に正規化する。
+    var effectiveStyleID: String? {
+        guard !isDeleted else { return nil }
+        guard let tag, tag != TravelStyleID.noneSentinel else { return nil }
+        return tag
     }
 
     var effectiveMood: VisitMood {

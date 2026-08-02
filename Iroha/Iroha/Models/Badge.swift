@@ -497,8 +497,12 @@ enum Badge: String, CaseIterable, Identifiable {
             return spring && summer && autumn && winter
 
         case .threeStyles:
-            let tags = Set(visits.map(\.effectiveTag)).subtracting([.none, .dayTrip, .stay, .lived])
-            return tags.count >= 3
+            // ID ベースで数える。カタログを引かないのは判定を純粋関数に保つためで、
+            // プリセットもユーザー定義も等しく 1 スタイルとして扱う。
+            // 未選択は effectiveStyleID が nil を返すので compactMap で落ちる。
+            let styleIDs = Set(visits.compactMap(\.effectiveStyleID))
+                .subtracting(TravelStylePreset.legacyIDs)
+            return styleIDs.count >= 3
 
         case .landlocked:
             return Self.landlockedIDs.isSubset(of: stats.visitedIDs)
