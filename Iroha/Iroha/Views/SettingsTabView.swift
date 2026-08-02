@@ -327,6 +327,7 @@ struct SettingsView: View {
         UserDefaults.standard.removeObject(forKey: "appearance_mode")
         UserDefaults.standard.removeObject(forKey: "last_backup_date")
         UserDefaults.standard.removeObject(forKey: "show_memory_card")
+        CompanionSuggestionStore.clear()
         appearanceMode = 0
     }
 

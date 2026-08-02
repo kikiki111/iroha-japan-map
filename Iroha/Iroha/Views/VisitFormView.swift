@@ -29,6 +29,8 @@ struct VisitFormView: View {
     @State private var removedFilenames: [String] = []
     @State private var companions: [String] = []
     @State private var companionInput = ""
+    /// 候補チップから非表示にした同行者名 (記録側の companions には影響しない)
+    @State private var hiddenCompanions: Set<String> = CompanionSuggestionStore.hidden()
     @State private var location = ""
     @State private var locationLatitude: Double?
     @State private var locationLongitude: Double?
@@ -515,7 +517,7 @@ struct VisitFormView: View {
     private var companionSuggestions: [String] {
         let all = Set(allVisits.flatMap { $0.companions })
         let current = Set(companions)
-        let available = all.subtracting(current)
+        let available = all.subtracting(current).subtracting(hiddenCompanions)
         if companionInput.isEmpty { return Array(available).sorted() }
         return available.filter { $0.localizedCaseInsensitiveContains(companionInput) }.sorted()
     }
@@ -525,6 +527,17 @@ struct VisitFormView: View {
         guard !name.isEmpty, !companions.contains(name) else { return }
         companions.append(name)
         companionInput = ""
+        // 非表示にした名前を手入力で入れ直したら、候補として復活させる (復元手段の確保)
+        if hiddenCompanions.contains(name) {
+            CompanionSuggestionStore.unhide(name)
+            hiddenCompanions.remove(name)
+        }
+    }
+
+    /// 候補チップから名前を非表示にする (過去の記録は変更しない)
+    private func hideCompanionSuggestion(_ name: String) {
+        CompanionSuggestionStore.hide(name)
+        hiddenCompanions.insert(name)
     }
 
     private var companionContent: some View {
@@ -554,7 +567,7 @@ struct VisitFormView: View {
 
             if !companionSuggestions.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("候補")
+                    Text("候補（長押しで削除）")
                         .font(.system(size: 11))
                         .foregroundColor(.irohaSumi3)
                     FlowLayout(spacing: 6) {
@@ -570,6 +583,13 @@ struct VisitFormView: View {
                                     .padding(.vertical, 5)
                                     .background(Color.irohaFuji.opacity(0.08))
                                     .clipShape(Capsule())
+                            }
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    hideCompanionSuggestion(name)
+                                } label: {
+                                    Label("候補から削除", systemImage: "trash")
+                                }
                             }
                         }
                     }
