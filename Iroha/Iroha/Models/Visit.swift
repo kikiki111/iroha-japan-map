@@ -9,11 +9,22 @@ import SwiftData
 /// 都道府県への訪問を表す SwiftData モデル
 @Model
 final class Visit {
+    /// 先頭県の名前（レガシー互換用ミラー）。正は `prefectureIDs`。
     var prefectureName: String = ""
     /// `Prefecture.id` (1〜47)。`Prefecture` を SwiftData から外したため、
     /// 訪問先の参照キーとして保持する。既存 Visit は `VisitPrefectureMigration` で
     /// `prefectureName` から backfill される。
+    ///
+    /// - Important: 複数県対応後は **先頭県のミラー**であり、正は `prefectureIDs`。
+    ///   旧バージョンアプリ (CloudKit 相互運用) と `TripDetector.chronological` が
+    ///   このミラーに依存しているため、空にしてはならない。更新は
+    ///   `setPrefectureIDs(_:)` を経由すること。
     var prefectureID: Int = 0
+    /// 訪問した都道府県 ID の配列（訪問順、重複なし）。1 レコードで複数県を記録できる。
+    /// 写真の `photoFilename` → `photoFilenames` と同じ流儀で旧単数フィールドを残し、
+    /// 参照は `effectivePrefectureIDs` に一本化する。CloudKit 互換のため default 値必須。
+    /// 居住 (`kind == .residence`) では常に 1 要素。
+    var prefectureIDs: [Int] = []
     /// 記録種別 (旅行 / 居住)。nil = 旧データ、`effectiveKind` で `.travel` に倒す。
     var kind: VisitKind?
     /// 旧 `date` 属性からのライトウェイトマイグレーション対応。
@@ -74,6 +85,7 @@ final class Visit {
     var photos: [VisitPhoto]? = []
 
     init(prefectureName: String, prefectureID: Int = 0,
+         prefectureIDs: [Int] = [],
          startDate: Date, endDate: Date? = nil,
          note: String = "", tag: String? = nil,
          kind: VisitKind = .travel,
@@ -82,6 +94,10 @@ final class Visit {
          dateAccuracy: DateAccuracy = .day) {
         self.prefectureName     = prefectureName
         self.prefectureID       = prefectureID
+        // 単一県で初期化された場合も配列側を埋め、migration 待ちの中間状態を作らない
+        self.prefectureIDs      = prefectureIDs.isEmpty
+            ? (prefectureID == 0 ? [] : [prefectureID])
+            : prefectureIDs
         self.startDate          = startDate
         self.endDate            = endDate
         self.note               = note
@@ -130,6 +146,79 @@ final class Visit {
     var effectiveTransports: [VisitTransport] {
         guard !isDeleted else { return [] }
         return transports.compactMap { VisitTransport(rawValue: $0) }.filter { $0 != .none }
+    }
+
+    // MARK: - Prefecture helpers (複数県対応)
+    //
+    // 新 `prefectureIDs` と旧 `prefectureID` / `prefectureName` が共存する。
+    // 参照側は必ず `effectivePrefectureIDs` / `effectivePrefectureNames` を使い、
+    // 書き込みは `setPrefectureIDs(_:)` に集約してミラーの不変条件を守る。
+    //
+    // 不変条件: prefectureIDs.first == prefectureID
+    //           && prefectureName == Prefecture.by(id: prefectureID)?.name
+
+    /// 複数県を並べるときの区切り (Trip の経路表示と揃える)
+    static let prefectureSeparator = " → "
+
+    /// 集計・地図塗り分けに使う都道府県 ID 群（訪問順、重複なし）。
+    ///
+    /// - Important: `prefectureIDs` が空のときの `prefectureID` フォールバックは、
+    ///   CloudKit で旧バージョン端末から降ってきた直後 (migration 前) に記録が
+    ///   集計から消えるのを防ぐためのもの。削除しないこと。
+    var effectivePrefectureIDs: [Int] {
+        guard !isDeleted else { return [] }
+        if prefectureIDs.isEmpty {
+            return prefectureID == 0 ? [] : [prefectureID]
+        }
+        // 大半のレコードは 1 県なので Set 生成を省く
+        if prefectureIDs.count == 1 { return prefectureIDs }
+        var seen = Set<Int>()
+        return prefectureIDs.filter { seen.insert($0).inserted }
+    }
+
+    /// 表示用の都道府県名（訪問順）。ID が 1 つも解決できない旧データ (異表記など) は
+    /// `prefectureName` をそのまま返し、画面から記録が消えないようにする。
+    var effectivePrefectureNames: [String] {
+        guard !isDeleted else { return [] }
+        let names = effectivePrefectureIDs.compactMap { Prefecture.by(id: $0)?.name }
+        if names.isEmpty {
+            return prefectureName.isEmpty ? [] : [prefectureName]
+        }
+        return names
+    }
+
+    /// 「京都府 → 大阪府 → 兵庫県」形式の表示文字列。
+    var prefectureDisplayName: String {
+        effectivePrefectureNames.joined(separator: Self.prefectureSeparator)
+    }
+
+    /// 幅の限られた箇所向けの省略版。`limit` 県まで連結し、超過分は「ほか N 県」を付す。
+    func prefectureDisplayName(limit: Int) -> String {
+        let names = effectivePrefectureNames
+        guard limit > 0, names.count > limit else {
+            return names.joined(separator: Self.prefectureSeparator)
+        }
+        return names.prefix(limit).joined(separator: Self.prefectureSeparator)
+            + " ほか\(names.count - limit)県"
+    }
+
+    /// 都道府県 ID 群を設定し、旧 `prefectureID` / `prefectureName` に先頭県をミラーする。
+    ///
+    /// 居住 (`isResidence`) は先頭 1 県に切り詰める。数年に及ぶ居住期間を複数県に
+    /// またがらせると `VisitStats.residenceIDs` が水増しされ「住んだ県」の件数が狂うため、
+    /// UI 側のガードに加えてモデル層でも防ぐ。
+    /// - Note: 空配列は無視する (Visit は必ず 1 県以上を持つ。VisitFormView は
+    ///   保存ボタンの `disabled` で空を弾いている)。
+    func setPrefectureIDs(_ ids: [Int]) {
+        var seen = Set<Int>()
+        var unique = ids.filter { seen.insert($0).inserted }
+        if isResidence, unique.count > 1 {
+            unique = Array(unique.prefix(1))
+        }
+        guard let first = unique.first else { return }
+        prefectureIDs  = unique
+        prefectureID   = first
+        prefectureName = Prefecture.by(id: first)?.name ?? prefectureName
     }
 
     /// 帰着日（nil の場合は startDate を返す）

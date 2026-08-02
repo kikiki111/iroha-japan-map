@@ -16,7 +16,9 @@ struct VisitFormView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.travelStyleCatalog) private var styleCatalog
 
-    @State private var selectedPrefectureName = ""
+    /// 選択中の都道府県 ID。配列順が訪問順になり、表示の「→」連結順に対応する。
+    /// 居住 (`isResidenceMode`) では常に 1 要素。
+    @State private var selectedPrefectureIDs: [Int] = []
     @State private var selectedKind: VisitKind = .travel
     @State private var visitDate = Date()
     @State private var endDate = Date()
@@ -60,8 +62,12 @@ struct VisitFormView: View {
     @State private var skipNextEndDateChange = false
 
     private var isEditing: Bool { editingVisit != nil }
-    private var isPrefectureLocked: Bool { prefecture != nil }
     private let maxPhotoCount = 10
+    /// 1 記録あたりの都道府県上限。行ヘッダのサマリと CloudKit レコードサイズを
+    /// 現実的な範囲に保つための上限。
+    private let maxPrefectureCount = 10
+    /// 行ヘッダのサマリで連結表示する県数。超過分は「ほか N 県」に畳む。
+    private let prefectureSummaryLimit = 2
     /// 年ホイールの下限。旅行記録として現実的な範囲に絞る。
     private let earliestSelectableYear = 1940
     private static let monthsInYear = Array(1...12)
@@ -150,7 +156,7 @@ struct VisitFormView: View {
                         Button("保存") { save() }
                             .font(.system(size: 16, weight: .bold))
                             .foregroundColor(.irohaFujiDk)
-                            .disabled(selectedPrefectureName.isEmpty)
+                            .disabled(selectedPrefectureIDs.isEmpty)
                     }
                 }
             }
@@ -218,7 +224,7 @@ struct VisitFormView: View {
                 Button {
                     guard selectedKind != kind else { return }
                     selectedKind = kind
-                    syncDatesForKindChange(to: kind)
+                    syncFieldsForKindChange(to: kind)
                     withAnimation(.easeInOut(duration: 0.25)) {
                         expandedSection = nil
                     }
@@ -245,8 +251,8 @@ struct VisitFormView: View {
         .padding(.bottom, 14)
     }
 
-    /// 種別切替時に、もう一方の日付 state を破綻させないよう揃える。
-    private func syncDatesForKindChange(to kind: VisitKind) {
+    /// 種別切替時に、もう一方のモードで不整合になる state を揃える。
+    private func syncFieldsForKindChange(to kind: VisitKind) {
         switch kind {
         case .residence:
             // 居住は residencePeriodText で既に年月粒度の表示を持つため、精度の概念を持たない。
@@ -255,6 +261,10 @@ struct VisitFormView: View {
             dateAccuracy = .day
             // 旅行の帰着日を居住終了日の初期値として引き継ぐ
             if residenceEndDate < visitDate { residenceEndDate = max(endDate, visitDate) }
+            // 居住は 1 県のみ。旅行で複数県を選んだ後に切り替えたら先頭県だけ残す
+            if selectedPrefectureIDs.count > 1 {
+                selectedPrefectureIDs = Array(selectedPrefectureIDs.prefix(1))
+            }
         case .travel:
             // 居住から戻したときに endDate < visitDate の不正状態を作らない
             if endDate < visitDate {
@@ -365,9 +375,11 @@ struct VisitFormView: View {
             rowHeader(
                 icon: "mappin.circle",
                 label: "都道府県",
-                value: selectedPrefectureName.isEmpty ? "選択してください" : selectedPrefectureName,
-                valueColor: selectedPrefectureName.isEmpty ? .irohaSumi3 : .irohaSumi,
-                section: isPrefectureLocked ? nil : .prefecture
+                value: prefectureSummary,
+                valueColor: selectedPrefectureIDs.isEmpty ? .irohaSumi3 : .irohaSumi,
+                lineLimit: 1,
+                // 県詳細シート経由でもロックしない (初期選択されるが他県を追加できる)
+                section: .prefecture
             )
 
             if expandedSection == .prefecture {
@@ -907,6 +919,13 @@ struct VisitFormView: View {
             .background(Color.irohaCard)
             .clipShape(RoundedRectangle(cornerRadius: 8))
 
+            // 選択済みチップ (訪問順)。47 チップの地方グリッドより上に置くことで、
+            // スクロールせずに選んだ順序と件数を確認できるようにする。
+            // 居住は 1 県固定なのでチップ一覧を出さない。
+            if !isResidenceMode, !selectedPrefectureIDs.isEmpty {
+                selectedPrefectureChips
+            }
+
             ForEach(Region.allCases) { region in
                 let regionPrefs = filteredPrefectures(for: region)
                 if !regionPrefs.isEmpty {
@@ -918,13 +937,10 @@ struct VisitFormView: View {
 
                         FlowLayout(spacing: 6) {
                             ForEach(regionPrefs) { pref in
-                                let isSelected = pref.name == selectedPrefectureName
+                                let isSelected = selectedPrefectureIDs.contains(pref.id)
+                                let isFull = selectedPrefectureIDs.count >= maxPrefectureCount
                                 Button {
-                                    selectedPrefectureName = pref.name
-                                    prefectureSearch = ""
-                                    withAnimation(.easeInOut(duration: 0.25)) {
-                                        expandedSection = nil
-                                    }
+                                    togglePrefecture(pref)
                                 } label: {
                                     Text(pref.name)
                                         .font(.system(size: 14))
@@ -937,6 +953,9 @@ struct VisitFormView: View {
                                             Capsule().stroke(isSelected ? Color.irohaFujiDk : Color.irohaWashi3, lineWidth: 0.5)
                                         )
                                 }
+                                // 上限到達後は未選択の県を押せなくする (居住は常に置き換えなので対象外)
+                                .disabled(!isResidenceMode && !isSelected && isFull)
+                                .opacity(!isResidenceMode && !isSelected && isFull ? 0.4 : 1)
                             }
                         }
                     }
@@ -945,6 +964,62 @@ struct VisitFormView: View {
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 14)
+    }
+
+    /// 選択済み都道府県のチップ列 (訪問順)。× で個別に外せる。
+    private var selectedPrefectureChips: some View {
+        VStack(spacing: 4) {
+            FlowLayout(spacing: 6) {
+                ForEach(selectedPrefectureIDs, id: \.self) { id in
+                    let name = Prefecture.by(id: id)?.name ?? ""
+                    HStack(spacing: 4) {
+                        Text(name)
+                            .font(.system(size: 13))
+                        Button {
+                            selectedPrefectureIDs.removeAll { $0 == id }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundColor(.irohaSumi3)
+                        }
+                        .accessibilityLabel("\(name)を選択から外す")
+                    }
+                    .foregroundColor(.irohaSumi)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.irohaWashi2)
+                    .clipShape(Capsule())
+                }
+            }
+
+            Text(verbatim: "\(selectedPrefectureIDs.count) / \(maxPrefectureCount)")
+                .font(.system(size: 11))
+                .foregroundColor(.irohaSumi3)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+
+    /// 都道府県チップのタップ処理。
+    /// 旅行は複数選択のトグル (移動手段ピッカーと同じ挙動、セクションは閉じない)。
+    /// 居住は 1 県固定なので従来どおり単一選択で、選んだらセクションを閉じる。
+    private func togglePrefecture(_ pref: Prefecture) {
+        prefectureSearch = ""
+
+        guard !isResidenceMode else {
+            selectedPrefectureIDs = [pref.id]
+            withAnimation(.easeInOut(duration: 0.25)) {
+                expandedSection = nil
+            }
+            return
+        }
+
+        if let index = selectedPrefectureIDs.firstIndex(of: pref.id) {
+            selectedPrefectureIDs.remove(at: index)
+        } else {
+            guard selectedPrefectureIDs.count < maxPrefectureCount else { return }
+            // 末尾に足すことで「選んだ順 = 訪問順」を保つ
+            selectedPrefectureIDs.append(pref.id)
+        }
     }
 
     private var datePickerContent: some View {
@@ -1420,11 +1495,15 @@ struct VisitFormView: View {
             .padding(.leading, 58)
     }
 
+    /// - Parameter lineLimit: 値テキストの行数上限。既定 (nil) は無制限。
+    ///   長い値でも折り返して全文を見せたい行 (日付・場所) はそのまま、
+    ///   1 行に収めたい行 (都道府県) だけ 1 を渡す。
     private func rowHeader(
         icon: String,
         label: String,
         value: String,
         valueColor: Color = .irohaSumi,
+        lineLimit: Int? = nil,
         section: FormSection?
     ) -> some View {
         HStack(spacing: 14) {
@@ -1442,6 +1521,8 @@ struct VisitFormView: View {
             Text(value)
                 .font(.system(size: 15))
                 .foregroundColor(valueColor)
+                .lineLimit(lineLimit)
+                .truncationMode(.tail)
 
             if let section {
                 chevron(for: section)
@@ -1475,6 +1556,18 @@ struct VisitFormView: View {
                                   accuracy: effectiveFormAccuracy, separator: "→")
     }
 
+    /// 行ヘッダ用のサマリ。幅が限られるため `prefectureSummaryLimit` 県までを連結し、
+    /// 超過分は「ほか N 県」に畳む。全県の並びは展開したピッカーのチップで確認できる。
+    private var prefectureSummary: String {
+        guard !selectedPrefectureIDs.isEmpty else { return "選択してください" }
+        let names = selectedPrefectureIDs.compactMap { Prefecture.by(id: $0)?.name }
+        guard names.count > prefectureSummaryLimit else {
+            return names.joined(separator: Visit.prefectureSeparator)
+        }
+        return names.prefix(prefectureSummaryLimit).joined(separator: Visit.prefectureSeparator)
+            + " ほか\(names.count - prefectureSummaryLimit)県"
+    }
+
     private func filteredPrefectures(for region: Region) -> [Prefecture] {
         let regionPrefs = prefectures.filter { $0.region == region }
         if prefectureSearch.isEmpty { return regionPrefs }
@@ -1487,7 +1580,7 @@ struct VisitFormView: View {
         guard !didPopulate else { return }
         didPopulate = true
         if let visit = editingVisit {
-            selectedPrefectureName = visit.prefectureName
+            selectedPrefectureIDs = visit.effectivePrefectureIDs
             selectedKind = visit.effectiveKind
             visitDate = visit.startDate
             endDate = visit.effectiveEndDate
@@ -1512,8 +1605,9 @@ struct VisitFormView: View {
                 }
             }
         } else if let pref = prefecture {
-            selectedPrefectureName = pref.name
-        } else if !isPrefectureLocked && editingVisit == nil {
+            // 県詳細シート由来。初期値として入れるだけでロックはしない
+            selectedPrefectureIDs = [pref.id]
+        } else {
             expandedSection = .prefecture
         }
     }
@@ -1581,15 +1675,22 @@ struct VisitFormView: View {
         let computedTripName = isResidenceMode ? "" : tripName
         // 日付精度も旅行専用 (居住は年月粒度の専用表示を持つ)
         let computedDateAccuracy: DateAccuracy = isResidenceMode ? .day : dateAccuracy
-        let resolvedPrefectureID = Prefecture.by(name: selectedPrefectureName)?.id ?? 0
+        // 複数県は旅行専用。居住は先頭 1 県に切り詰める (UI 側でも単一選択にしているが、
+        // 種別を切り替えた直後の取りこぼしを防ぐ保険)。
+        let computedPrefectureIDs = isResidenceMode
+            ? Array(selectedPrefectureIDs.prefix(1))
+            : selectedPrefectureIDs
+        // 旧 prefectureID / prefectureName には先頭県をミラーする
+        let primaryPrefectureID = computedPrefectureIDs.first ?? 0
+        let primaryPrefectureName = Prefecture.by(id: primaryPrefectureID)?.name ?? ""
 
         // メタデータ更新 (Visit を確保)
         let visit: Visit
         if let existing = editingVisit {
             visit = existing
-            visit.prefectureName = selectedPrefectureName
-            visit.prefectureID = resolvedPrefectureID
+            // kind を先に確定させる (setPrefectureIDs が居住なら 1 県に切り詰めるため)
             visit.kind = selectedKind
+            visit.setPrefectureIDs(computedPrefectureIDs)
             visit.startDate = normalizedStartDate
             visit.endDate = computedEndDate
             visit.dateAccuracy = computedDateAccuracy
@@ -1606,8 +1707,9 @@ struct VisitFormView: View {
             visit.locationLongitude = locationLongitude
         } else {
             let newVisit = Visit(
-                prefectureName: selectedPrefectureName,
-                prefectureID: resolvedPrefectureID,
+                prefectureName: primaryPrefectureName,
+                prefectureID: primaryPrefectureID,
+                prefectureIDs: computedPrefectureIDs,
                 startDate: normalizedStartDate,
                 endDate: computedEndDate,
                 note: memo,

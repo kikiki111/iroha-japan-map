@@ -51,7 +51,12 @@ ContentView
 - CloudKit 同期対象から外すことで、複数端末での seed 重複・unique 制約問題を回避
 
 ### Visit（SwiftData @Model — CloudKit 同期対象 / Phase 6 で有効化）
-- prefectureName, prefectureID（Prefecture.id への参照キー）
+- prefectureIDs: [Int]（訪問した Prefecture.id の配列。**訪問先の正**。訪問順・重複なし。1 レコードで複数県を記録できる）
+- prefectureName, prefectureID（**先頭県のミラー**。旧バージョンアプリとの CloudKit 相互運用と `TripDetector.chronological` のタイブレーカーが依存するため空にしない）
+  - 更新は必ず `setPrefectureIDs(_:)` を経由し、`prefectureIDs.first == prefectureID` の不変条件を保つ
+  - 参照は `effectivePrefectureIDs` / `effectivePrefectureNames` に一本化する（配列が空の旧レコードは prefectureID にフォールバックするため、migration 前でも集計から消えない）
+  - 表示は `prefectureDisplayName`（「京都府 → 大阪府 → 兵庫県」）/ `prefectureDisplayName(limit:)`（超過分を「ほか N 県」に畳む）
+  - 居住（`kind == .residence`）は常に 1 県
 - kind: VisitKind?（旅行 / 居住。nil = 旧データ → effectiveKind で .travel に倒す）
 - startDate（旅行の開始日 / 居住の開始日）, endDate（**旅行専用**、nil = 日帰り）, note
 - residenceEndDate: Date?（**居住専用**の終了日）, isResidenceOngoing: Bool（現在も居住中）
@@ -67,6 +72,7 @@ ContentView
 - 旧 photoFilenames / photoThumbnails / photoFilename / photoThumbnail（PhotoMigration 完了確認まで併存）
 - 互換ヘルパー: totalPhotoCount, sortedPhotoThumbnails, sortedPhotoFilenames, sortedPhotos
 - 居住ヘルパー: effectiveKind, isResidence, residencePeriodText, residenceDurationText
+- 都道府県ヘルパー: effectivePrefectureIDs, effectivePrefectureNames, prefectureDisplayName, prefectureDisplayName(limit:), setPrefectureIDs(_:)
 - 日付精度ヘルパー: effectiveDateAccuracy, isDateAmbiguous, nightCount（曖昧な日付・居住では nil）
 - 新フィールド追加時は CloudKit 互換のため **optional か default 値付き** が必須（`kind` / `dateAccuracy` は optional、`isResidenceOngoing` は default false）。lightweight migration で自動処理されるため専用 Migration は不要
 
@@ -81,6 +87,8 @@ ContentView
 
 ### VisitStats（派生集計 ヘルパー）
 - visits 群を引数に取り、prefectureID → count の辞書を生成
+- 1 レコードが複数県を持つ場合は **各県に 1 ずつ加算**（全県を等しくカウント）。同一レコード内の県重複は `effectivePrefectureIDs` が除去済み
+- `groupedByPrefectureID(_:)`（static）— 任意の Visit 群を県 ID でグルーピングする多対多版。`Dictionary(grouping:by:)` は 1 レコード 1 キー前提で使えないため、母集団を限定した集計（バッジ判定・期間フィルタ後の最多県）はこちらを使う。母集団が呼び出し側ごとに違うのでインスタンスに辞書を持たせず引数で受ける
 - **居住は count に加算しない**（5 年住んだのを「1 回訪問」としない）が、`visitedIDs` には含める（住んだ県を未訪問扱いにしない）
 - API: count(for:), isVisited(_:), isResidence(_:), residenceCount, isAllVisited, visitedPrefectures, visitsByRegion(), isRegionConquered(_:), color(for:), colorHex(for:), signature
 - `colorHex(for:)` の優先順位は **旅行 > 居住**。淡い金茶 `#E8D9A8` を返すのは「居住あり かつ 旅行 0 回」の県のみで、旅行があれば訪問回数どおりの紫になる（地図から旅行回数を読めるようにするため）
@@ -90,6 +98,8 @@ ContentView
 ### Trip（非永続化 — TripDetector で動的生成）
 - visits: [Visit]
 - computed: startDate, endDate, isSingleVisit, prefectureNames
+- `prefectureNames` は各 Visit の `effectivePrefectureNames` を flatMap して重複除去（レコード内の登録順 = 訪問順を保つ）
+- `isSingleVisit` は「**記録数** 1」であって県数ではない。1 レコードに複数県を登録できるため `isSingleVisit == true && prefectureNames.count > 1` はあり得る（TimelineView の単票分岐はこの前提で県名に `prefectureDisplayName` を使う）
 
 ### Region（enum）
 hokkaido, tohoku, kanto, chubu, kinki, chugoku, shikoku, kyushu
@@ -138,7 +148,8 @@ Prefecture（SwiftData）←→ MapViewModel → JapanMapView（WKWebView）
 0'. **日付が曖昧な記録（`isDateAmbiguous`）を確定日付の群から分離**
    （代表日が実際の訪問日と一致しないため。時系列の途中に混ざると、その前後にある
    確定日付どうしの連結まで分断してしまう。曖昧な記録は常に単独 Trip とする）
-1. 確定日付の Visit を startDate でソート（同一日は県名をタイブレーカーに）
+1. 確定日付の Visit を startDate でソート（同一日は県名をタイブレーカーに。この県名は
+   `prefectureName` = 先頭県のミラーを見ており、`setPrefectureIDs(_:)` が維持している）
 2. 前の Visit の effectiveEndDate から次の Visit の startDate が 3日以内 → 同じ旅行グループ
 3. グループを Trip オブジェクトに変換（FNV-1a ハッシュで確定的 UUID 生成）
    - seed はグループを構成する `persistentModelID` のハッシュ。「県名 + 代表日」だと
@@ -158,7 +169,7 @@ Prefecture（SwiftData）←→ MapViewModel → JapanMapView（WKWebView）
 - TripDetector — 旅行グループ自動検出（3日ルール）
 - VisitPhotoStore — 写真の保存・取得・削除（VisitPhoto 経由、2048px/5MB に強制縮小、新旧ハイブリッドロード）
 - PhotoStorageManager — 旧 Documents/Photos/ への読み書き（Phase A 移行期間中に PhotoMigration / 互換ヘルパーから利用、Phase B 完了で削除予定）
-- VisitPrefectureMigration — 既存 Visit の prefectureID を prefectureName から backfill（起動時 1 回、scan ベース判定で冪等）
+- VisitPrefectureMigration — 都道府県フィールドの整備（起動時 1 回、scan ベース判定で冪等）。phase 1 = prefectureID を prefectureName から backfill、phase 2 = prefectureIDs を prefectureID から seed し先頭県ミラーの不整合（旧バージョンアプリが CloudKit 経由で訪問先を変更したケース）を単一県レコードに限り修復。phase 2 は `#Predicate` で配列の isEmpty を評価できないため全件 fetch + in-memory フィルタ
 - PhotoMigration — 既存 Documents/Photos/ ファイルを VisitPhoto に転記（写真単位冪等、旧データは Phase B まで保持）
 - CloudSyncStatusObserver — CloudKit 同期状態の集約・公開（CKAccountStatus + NWPathMonitor + UserDefaults）
 - MemoryNotificationManager — 「今日の記憶」通知スケジュール（UNCalendarNotificationTrigger）
@@ -168,6 +179,8 @@ Prefecture（SwiftData）←→ MapViewModel → JapanMapView（WKWebView）
 - ModelContainer の `cloudKitDatabase: .private("iCloud.com.qumo.Iroha")` で有効化
 - Schema は [Visit.self, VisitPhoto.self, TravelStyleRecord.self]（Prefecture と旅行スタイルのプリセットは静的テーブル、同期対象外）
 - `TravelStyleRecord` は新しい CKRecord タイプなので、**リリース前に CloudKit Dashboard で Production へスキーマをデプロイする**
+- `Visit.prefectureIDs` も新規フィールド（`CD_prefectureIDs`）なので同様に **Production へのスキーマデプロイが必要**。忘れると本番のみ複数県が他端末に同期しない
+- 旧バージョンアプリは `prefectureIDs` を知らないが、`prefectureName` / `prefectureID` に先頭県をミラーしているため記録が消えることはない（先頭 1 県の記録として見える）
 - 既存 @Model へのフィールド追加（`Visit.dateAccuracy` = `CD_dateAccuracy` など）も同じくデプロイが要る。
   Development はスキーマが自動生成されるため Debug ビルドの検証は素通りするが、Production 未反映のまま
   Release を配布すると、そのフィールドを含む Visit の push が丸ごと失敗する

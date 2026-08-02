@@ -27,7 +27,8 @@ struct PrefectureDetailSheet: View {
     @State private var showPhotoLoadError = false
 
     private var sortedVisits: [Visit] {
-        allVisits.filter { $0.prefectureID == prefecture.id }
+        // この県を含むすべての記録。複数県の記録は各県のシートに同じものが現れる。
+        allVisits.filter { $0.effectivePrefectureIDs.contains(prefecture.id) }
     }
 
     /// 旅行記録のみ（訪問回数・訪問履歴はこちらを使う）
@@ -448,6 +449,14 @@ struct PrefectureDetailSheet: View {
                     }
                     VisitTransportBadge(transports: visit.effectiveTransports)
                     VisitCompanionBadge(companions: visit.companions)
+                }
+
+                // 複数県の記録は、この県以外も含むことが分かるよう経路を添える
+                if visit.effectivePrefectureIDs.count > 1 {
+                    Text(visit.prefectureDisplayName)
+                        .font(.system(size: 11))
+                        .foregroundColor(.irohaSumi3)
+                        .lineLimit(1)
                 }
 
                 if visit.hasLocation {

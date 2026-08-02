@@ -461,6 +461,11 @@ enum Badge: String, CaseIterable, Identifiable {
 
     private static let landlockedIDs: Set<Int> = [9, 10, 11, 19, 20, 21, 25, 29]
 
+    /// 写真がある記録に登場した都道府県 ID 集合 (1 レコード複数県対応)。
+    private static func prefectureIDsWithPhotos(_ visits: [Visit]) -> Set<Int> {
+        Set(visits.filter(\.hasPhotos).flatMap(\.effectivePrefectureIDs))
+    }
+
     func isEarned(visits: [Visit], stats: VisitStats) -> Bool {
         // 「旅の回数・日数」を数える実績からは居住記録を除外する。
         // 居住は期間が数年に及ぶため、含めると件数が水増しされ、
@@ -546,7 +551,7 @@ enum Badge: String, CaseIterable, Identifiable {
 
         case .samePrefFourSeasons:
             let calendar = Calendar.current
-            let grouped = Dictionary(grouping: monthKnownVisits, by: \.prefectureName)
+            let grouped = VisitStats.groupedByPrefectureID(monthKnownVisits)
             return grouped.values.contains { prefVisits in
                 let months = Set(prefVisits.map { calendar.component(.month, from: $0.startDate) })
                 let spring = months.contains(where: { (3...5).contains($0) })
@@ -564,14 +569,13 @@ enum Badge: String, CaseIterable, Identifiable {
             return visits.contains(where: \.hasCompanions) && visits.contains(where: { !$0.hasCompanions })
 
         case .tenPhotoPrefectures:
-            let prefsWithPhotos = Set(visits.filter(\.hasPhotos).map(\.prefectureName))
-            return prefsWithPhotos.count >= 10
+            return Self.prefectureIDsWithPhotos(visits).count >= 10
 
         case .threeHundredPhotos:
             return visits.reduce(0) { $0 + $1.totalPhotoCount } >= 300
 
         case .moodGeography:
-            let grouped = Dictionary(grouping: visits, by: \.prefectureName)
+            let grouped = VisitStats.groupedByPrefectureID(visits)
             let qualifying = grouped.values.filter { prefVisits in
                 Set(prefVisits.map(\.effectiveMood).filter { $0 != .none }).count >= 2
             }
@@ -589,7 +593,7 @@ enum Badge: String, CaseIterable, Identifiable {
             return stats.visitedCount >= 35
 
         case .repeatVisitor:
-            let grouped = Dictionary(grouping: travelVisits, by: \.prefectureName)
+            let grouped = VisitStats.groupedByPrefectureID(travelVisits)
             let repeats = grouped.values.filter { $0.count >= 3 }
             return repeats.count >= 5
 
@@ -623,8 +627,7 @@ enum Badge: String, CaseIterable, Identifiable {
             return hasHokkaido && hasShikoku && hasKyushu && hasOkinawa
 
         case .twentyPhotoPrefectures:
-            let prefsWithPhotos = Set(visits.filter(\.hasPhotos).map(\.prefectureName))
-            return prefsWithPhotos.count >= 20
+            return Self.prefectureIDsWithPhotos(visits).count >= 20
 
         case .fiveHundredPhotos:
             return visits.reduce(0) { $0 + $1.totalPhotoCount } >= 500
@@ -666,15 +669,14 @@ enum Badge: String, CaseIterable, Identifiable {
         case .slowTraveler:
             let slowPrefs = Set(visits.filter { visit in
                 visit.effectiveTransports.contains(.bicycle) || visit.effectiveTransports.contains(.walking)
-            }.map(\.prefectureName))
+            }.flatMap(\.effectivePrefectureIDs))
             return slowPrefs.count >= 5
 
         case .namedTrips:
             return visits.filter { !$0.tripName.isEmpty }.count >= 10
 
         case .allPrefecturePhotos:
-            let prefsWithPhotos = Set(visits.filter(\.hasPhotos).map(\.prefectureName))
-            return prefsWithPhotos.count >= 47
+            return Self.prefectureIDsWithPhotos(visits).count >= 47
 
         case .thousandPhotos:
             return visits.reduce(0) { $0 + $1.totalPhotoCount } >= 1000

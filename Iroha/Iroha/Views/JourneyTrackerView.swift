@@ -258,13 +258,14 @@ struct JourneyTrackerView: View {
         let sorted = filteredVisits.sorted { $0.startDate < $1.startDate }
         let calendar = Calendar.current
         let range = chartDateRange
-        var seen = Set<String>()
+        var seen = Set<Int>()
         var cumulative = 0
         var points: [JourneyDataPoint] = [JourneyDataPoint(date: range.start, count: 0)]
 
         for visit in sorted {
             guard visit.startDate >= range.start, visit.startDate <= range.end else { continue }
-            if seen.insert(visit.prefectureName).inserted {
+            // 1 レコードに複数県があると同じ日に複数段上がる
+            for id in visit.effectivePrefectureIDs where seen.insert(id).inserted {
                 cumulative += 1
             }
             let day = calendar.startOfDay(for: visit.startDate)
@@ -287,7 +288,7 @@ struct JourneyTrackerView: View {
     }
 
     private func filteredVisitCount(for prefecture: Prefecture) -> Int {
-        filteredVisits.filter { $0.prefectureName == prefecture.name }.count
+        filteredVisits.filter { $0.effectivePrefectureIDs.contains(prefecture.id) }.count
     }
 
     // MARK: - Year highlights
@@ -297,31 +298,31 @@ struct JourneyTrackerView: View {
     }
 
     private var newPrefectureCountInYear: Int {
-        let currentNames = Set(filteredVisits.map(\.prefectureName))
-        guard selectedYear > 0 else { return currentNames.count }
+        let currentIDs = Set(filteredVisits.flatMap(\.effectivePrefectureIDs))
+        guard selectedYear > 0 else { return currentIDs.count }
         let beforeYear = visits.filter {
             Calendar.current.component(.year, from: $0.startDate) < selectedYear
         }
-        let previousNames = Set(beforeYear.map(\.prefectureName))
-        return currentNames.subtracting(previousNames).count
+        let previousIDs = Set(beforeYear.flatMap(\.effectivePrefectureIDs))
+        return currentIDs.subtracting(previousIDs).count
     }
 
     private var filteredConqueredRegionCount: Int {
         // 居住県も「訪れた」に含める（地図・統計バーと同じ扱い）
         let residenceIDs = residencePrefectureIDs
-        let visitedNames = Set(filteredVisits.map(\.prefectureName))
+        let visitedIDs = Set(filteredVisits.flatMap(\.effectivePrefectureIDs))
         return Region.allCases.filter { region in
             let group = prefectures.filter { $0.region == region }
             return !group.isEmpty && group.allSatisfy {
-                visitedNames.contains($0.name) || residenceIDs.contains($0.id)
+                visitedIDs.contains($0.id) || residenceIDs.contains($0.id)
             }
         }.count
     }
 
     private var mostVisitedInPeriod: (prefecture: Prefecture, count: Int)? {
-        let grouped = Dictionary(grouping: filteredVisits, by: \.prefectureName)
+        let grouped = VisitStats.groupedByPrefectureID(filteredVisits)
         guard let top = grouped.max(by: { $0.value.count < $1.value.count }),
-              let pref = prefectures.first(where: { $0.name == top.key }) else { return nil }
+              let pref = prefectures.first(where: { $0.id == top.key }) else { return nil }
         return (pref, top.value.count)
     }
 
@@ -346,9 +347,9 @@ struct JourneyTrackerView: View {
     }
 
     private var farthestPrefecture: Prefecture? {
-        let visitedNames = Set(filteredVisits.map(\.prefectureName))
+        let visitedIDs = Set(filteredVisits.flatMap(\.effectivePrefectureIDs))
         return prefectures
-            .filter { visitedNames.contains($0.name) }
+            .filter { visitedIDs.contains($0.id) }
             .max { distanceFromTokyo($0) < distanceFromTokyo($1) }
     }
 
@@ -430,7 +431,9 @@ struct JourneyTrackerView: View {
                     highlightRow(
                         icon: "airplane.departure",
                         label: "初旅",
-                        value: "\(VisitDateFormat.startText(firstVisit)) \u{00B7} \(firstVisit.prefectureName)",
+                        // 日付と同居する 1 行なので 1 県 +「ほか N 県」に留める
+                        // (2 県連結だと幅が足りず末尾が切り詰められて件数が読めない)
+                        value: "\(VisitDateFormat.startText(firstVisit)) \u{00B7} \(firstVisit.prefectureDisplayName(limit: 1))",
                         thumbnail: firstVisit.sortedPhotoThumbnails.first
                     ) {
                         highlightTrip = firstTrip
@@ -443,7 +446,7 @@ struct JourneyTrackerView: View {
                 // 最遠地
                 if let farthest = farthestPrefecture, farthestDistance > 0 {
                     let farthestVisit = filteredVisits
-                        .filter { $0.prefectureName == farthest.name }
+                        .filter { $0.effectivePrefectureIDs.contains(farthest.id) }
                         .min { $0.startDate < $1.startDate }
                     highlightRow(
                         icon: "mappin.and.ellipse",
@@ -484,7 +487,7 @@ struct JourneyTrackerView: View {
                 // 最多
                 if let top = mostVisitedInPeriod, top.count >= 1 {
                     let topVisit = filteredVisits
-                        .filter { $0.prefectureName == top.prefecture.name }
+                        .filter { $0.effectivePrefectureIDs.contains(top.prefecture.id) }
                         .max { $0.startDate < $1.startDate }
                     highlightRow(
                         icon: "heart.fill",
@@ -532,6 +535,7 @@ struct JourneyTrackerView: View {
                 Text(value)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.irohaSumi)
+                    .lineLimit(1)
 
                 Spacer()
 

@@ -142,9 +142,12 @@ struct MemoryCardView: View {
                     .font(.system(size: 12, weight: .bold))
                     .foregroundColor(.irohaFuji)
 
-                Text(memory.visit.prefectureName)
+                // カードは高さ固定。複数県でも 1 行に収める
+                Text(memory.visit.prefectureDisplayName)
                     .font(.system(size: 18, weight: .light, design: .serif))
                     .foregroundColor(.irohaSumi)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
 
                 if !memory.visit.note.isEmpty {
                     Text(memory.visit.note)

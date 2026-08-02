@@ -34,7 +34,8 @@ struct IrohaApp: App {
         do {
             let container = try ModelContainer(for: schema, configurations: [modelConfiguration])
             // 起動時マイグレーション。順序は重要:
-            //   1. prefectureID backfill (旧 Visit が VisitStats で集計対象になる)
+            //   1. prefectureID backfill + prefectureIDs seed
+            //      (旧 Visit が VisitStats で集計対象になる / 複数県配列へ詰め替え)
             //   2. legacy 写真 → VisitPhoto 転記 (旧データは削除せず保持、Phase B で清掃)
             VisitPrefectureMigration.migrate(context: container.mainContext)
             PhotoMigration.migrate(context: container.mainContext)

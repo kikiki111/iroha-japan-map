@@ -30,7 +30,10 @@ struct Trip: Identifiable, Equatable {
         visits.map(\.effectiveEndDate).max() ?? .distantFuture
     }
 
-    /// Whether this trip consists of a single visit.
+    /// Whether this trip consists of a single visit **record**.
+    ///
+    /// - Important: 「県が 1 つ」ではない。1 レコードに複数県を登録できるため、
+    ///   `isSingleVisit == true` かつ `prefectureNames.count > 1` はあり得る。
     var isSingleVisit: Bool { visits.count == 1 }
 
     /// この旅の日付精度。
@@ -60,11 +63,11 @@ struct Trip: Identifiable, Equatable {
     }
 
     /// Unique prefecture names visited on this trip, in chronological order.
+    /// 1 レコードに複数県がある場合はレコード内の登録順 (= 訪問順) を保って展開する。
     var prefectureNames: [String] {
         var seen = Set<String>()
         return visits.sorted { $0.startDate < $1.startDate }
-            .compactMap { visit in
-                seen.insert(visit.prefectureName).inserted ? visit.prefectureName : nil
-            }
+            .flatMap(\.effectivePrefectureNames)
+            .filter { seen.insert($0).inserted }
     }
 }

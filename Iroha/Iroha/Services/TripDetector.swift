@@ -48,6 +48,7 @@ enum TripDetector {
     // MARK: - Private helpers
 
     /// 同一代表日の記録が複数あっても順序がぶれないよう、県名をタイブレーカーにする。
+    /// (`prefectureName` は先頭県のミラー。`Visit.setPrefectureIDs` が維持する)
     private static func chronological(_ lhs: Visit, _ rhs: Visit) -> Bool {
         if lhs.startDate != rhs.startDate { return lhs.startDate < rhs.startDate }
         return lhs.prefectureName < rhs.prefectureName

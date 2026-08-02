@@ -374,7 +374,7 @@ struct TimelineView: View {
 
     private var yearHeader: some View {
         let yearVisits = filteredVisits
-        let prefCount = Set(yearVisits.map(\.prefectureName)).count
+        let prefCount = Set(yearVisits.flatMap(\.effectivePrefectureIDs)).count
         let tripCount = TripDetector.detect(from: yearVisits).count
 
         return HStack(alignment: .bottom) {
@@ -778,12 +778,16 @@ struct TimelineView: View {
 
         return VStack(alignment: .leading, spacing: 4) {
             // Row 1: Prefecture name(s) + badges
+            // 1 レコードの旅。複数県を登録していてもここに来る (スタイル・ムードバッジは
+            // この分岐にしかないため、経路表示にしたいからと else 側へ回さない)。
             if trip.isSingleVisit {
                 let visit = trip.visits[0]
                 HStack(spacing: 6) {
-                    Text(visit.prefectureName)
+                    Text(visit.prefectureDisplayName)
                         .font(.system(size: 16, weight: .bold))
                         .foregroundColor(.irohaFujiDk)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     VisitTagBadge(style: styleCatalog.style(for: visit))
                     if visit.effectiveMood != .none {
                         VisitMoodBadge(mood: visit.effectiveMood)
@@ -1099,8 +1103,10 @@ struct TripDetailSheet: View {
 
                 // Prefecture + tag + mood
                 HStack(spacing: 6) {
-                    Text(visit.prefectureName)
+                    Text(visit.prefectureDisplayName)
                         .font(.system(size: 16, weight: .bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     VisitTagBadge(style: styleCatalog.style(for: visit))
                     if visit.effectiveMood != .none {
                         VisitMoodBadge(mood: visit.effectiveMood)
