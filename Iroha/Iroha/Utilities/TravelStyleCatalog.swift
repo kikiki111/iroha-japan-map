@@ -60,7 +60,7 @@ struct TravelStyleCatalog {
             + customStyles.filter { !hiddenCustoms.contains($0.id) }
     }
 
-    /// `Visit.tag` の生値からスタイルを解決する。
+    /// `Visit.styleID` の生値からスタイルを解決する。
     ///
     /// 未選択 (`nil` / `"none"`) と未知 ID（他端末で削除済み等）は nil を返す。
     /// 非表示プリセットとレガシーは**解決できる**。過去の記録の表示を壊さないため。

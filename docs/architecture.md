@@ -65,7 +65,13 @@ ContentView
   - 昔の旅行など日付が曖昧な記録用。`.month` / `.year` では startDate に代表日（月末 / 12/31、未来日は今日でクランプ）を格納する
   - startDate を Date のまま保つことで、`@Query(sort: \Visit.startDate)` 8 箇所と年フィルタを無改変で通せる
   - 居住は residencePeriodText で既に年月粒度の表示を持つため対象外（常に .day 扱い）
-- tag: String?（旅行スタイル ID。kind と直交する軸で、居住でも選べる。プリセットは `TravelStylePreset.rawValue`、ユーザー定義は `"u:<UUID>"`。未選択は nil で、レガシー文字列 `"none"` も未選択として扱う）
+- styleID: String?（旅行スタイル ID の**正**。kind と直交する軸で、居住でも選べる。プリセットは `TravelStylePreset.rawValue`、ユーザー定義は `"u:<UUID>"`。未選択は nil で、レガシー文字列 `"none"` も未選択として扱う）
+  - 参照は `effectiveStyleID`、書き込みは `setStyleID(_:)` を経由する。直接代入すると旧 `tag` が残り、フォールバックで解除済みスタイルが復活する
+- tag: VisitTag?（**移行元・書き込み禁止**。`VisitStyleIDMigration` が `styleID` へ転記する）
+  - 82e8657 で `VisitTag?` → `String?` に変えたところ、CloudKit の import が全件失敗して同期パイプラインが停止した（NSCocoaError 134420: desired NSString / given NSConcreteData）。SwiftData は enum を Data にアーカイブして送るため **CloudKit 上の `CD_tag` は BYTES で確定**しており、ローカル SQLite が双方とも `ZTAG VARCHAR`（rawValue 平文）で済んでいたのとは事情が違う
+  - **CloudKit のフィールド型は後から変更できない**ため、`tag` を enum に戻して `CD_tag` と型を合わせ、正の ID は新設した `styleID`（`CD_styleID` = STRING）に移した
+  - 転記後も `tag` は消さない。旧バージョンアプリ（1.0.5）は `styleID` を知らず `tag` だけを見るため、消すと旧端末でバッジが失われる。スタイルを変更・解除したときだけ `setStyleID(_:)` がクリアする
+  - `@Attribute(originalName:)` は付けない。CloudKit 連携ストアでは属性のリネーム自体が禁止されている
 - mood: VisitMood?（楽 / 癒 / 感 / 驚 / 懐 / 静）
 - transports, tripName, companions, location, locationLatitude, locationLongitude
 - photos: [VisitPhoto]?（@Relationship, cascade delete, optional 必須）
@@ -122,8 +128,8 @@ travel（旅行）, residence（居住）
 | `TravelStyleStore`（enum） | 書き込み専用 CRUD。読み取りは `@Query` + カタログが担う |
 
 - **プリセットは SwiftData に seed しない。** `Prefecture` と同じ理由（複数端末での seed 重複回避）
-- ユーザー定義は CloudKit 同期する。`Visit.tag` が同期対象である以上、定義だけ端末ローカルに置くと他端末でバッジが消えるため
-- カスタムスタイルの削除時は、該当 `Visit.tag` を nil にしてから 1 トランザクションで消す（記録自体は削除しない）
+- ユーザー定義は CloudKit 同期する。`Visit.styleID` が同期対象である以上、定義だけ端末ローカルに置くと他端末でバッジが消えるため
+- カスタムスタイルの削除時は、該当 Visit を `setStyleID(nil)` で外してから 1 トランザクションで消す（記録自体は削除しない）。判定は `effectiveStyleID` で行い、旧 `tag` にしか値がない未移行レコードも拾う
 
 ### VisitMood（enum — 伝統色ベース）
 none, tanoshi(楽/桜), iyashi(癒/若草), kandou(感/藤), odoroki(驚/山吹), natsukashi(懐/茜), shizuka(静/浅葱)
@@ -170,6 +176,7 @@ Prefecture（SwiftData）←→ MapViewModel → JapanMapView（WKWebView）
 - VisitPhotoStore — 写真の保存・取得・削除（VisitPhoto 経由、2048px/5MB に強制縮小、新旧ハイブリッドロード）
 - PhotoStorageManager — 旧 Documents/Photos/ への読み書き（Phase A 移行期間中に PhotoMigration / 互換ヘルパーから利用、Phase B 完了で削除予定）
 - VisitPrefectureMigration — 都道府県フィールドの整備（起動時 1 回、scan ベース判定で冪等）。phase 1 = prefectureID を prefectureName から backfill、phase 2 = prefectureIDs を prefectureID から seed し先頭県ミラーの不整合（旧バージョンアプリが CloudKit 経由で訪問先を変更したケース）を単一県レコードに限り修復。phase 2 は `#Predicate` で配列の isEmpty を評価できないため全件 fetch + in-memory フィルタ
+- VisitStyleIDMigration — 旧 `Visit.tag`（`VisitTag?`）を `Visit.styleID`（`String?`）へ転記（起動時 1 回、`styleID == nil && tag != nil` の scan ベース判定で冪等）。旧 `.none` は未選択の意味なので転記しない。旧バージョンアプリ互換のため転記後も `tag` は残す
 - PhotoMigration — 既存 Documents/Photos/ ファイルを VisitPhoto に転記（写真単位冪等、旧データは Phase B まで保持）
 - CloudSyncStatusObserver — CloudKit 同期状態の集約・公開（CKAccountStatus + NWPathMonitor + UserDefaults）
 - MemoryNotificationManager — 「今日の記憶」通知スケジュール（UNCalendarNotificationTrigger）
@@ -179,7 +186,7 @@ Prefecture（SwiftData）←→ MapViewModel → JapanMapView（WKWebView）
 - ModelContainer の `cloudKitDatabase: .private("iCloud.com.qumo.Iroha")` で有効化
 - Schema は [Visit.self, VisitPhoto.self, TravelStyleRecord.self]（Prefecture と旅行スタイルのプリセットは静的テーブル、同期対象外）
 - `TravelStyleRecord` は新しい CKRecord タイプなので、**リリース前に CloudKit Dashboard で Production へスキーマをデプロイする**
-- `Visit.prefectureIDs` も新規フィールド（`CD_prefectureIDs`）なので同様に **Production へのスキーマデプロイが必要**。忘れると本番のみ複数県が他端末に同期しない
+- `Visit.prefectureIDs`（`CD_prefectureIDs`）と `Visit.styleID`（`CD_styleID`）も新規フィールドなので同様に **Production へのスキーマデプロイが必要**。忘れると本番のみ複数県とスタイルが他端末に同期しない
 - 旧バージョンアプリは `prefectureIDs` を知らないが、`prefectureName` / `prefectureID` に先頭県をミラーしているため記録が消えることはない（先頭 1 県の記録として見える）
 - 既存 @Model へのフィールド追加（`Visit.dateAccuracy` = `CD_dateAccuracy` など）も同じくデプロイが要る。
   Development はスキーマが自動生成されるため Debug ビルドの検証は素通りするが、Production 未反映のまま
@@ -187,3 +194,5 @@ Prefecture（SwiftData）←→ MapViewModel → JapanMapView（WKWebView）
 - ユーザの ON/OFF 設定: UserDefaults `cloud_sync_enabled`
 - 初回起動時: CloudSyncOnboardingView で選択
 - ON/OFF 切替は ModelContainer の起動時固定のため、変更後はアプリ再起動を要求
+- **enum プロパティの型を後から変えない。** SwiftData は enum を Data にアーカイブして送るため CloudKit 上は BYTES で確定する。String などに変えると import が型不一致で全件失敗し（NSCocoaError 134420）、import が詰まると export も動かず同期パイプライン全体が止まる。CloudKit のフィールド型は変更できないので、**別名の新プロパティを作って移行する**（`Visit.tag` → `Visit.styleID` の実例を参照）
+- 同期の停止はユーザーから見えない。`CloudSyncStatusObserver` は `CKAccountStatus` とネット接続しか見ておらず、import/export の失敗を検知しない。スキーマを変えたリリースでは `ANSCKEVENT` テーブル（type: 0=setup / 1=import / 2=export）で成否を実測すること

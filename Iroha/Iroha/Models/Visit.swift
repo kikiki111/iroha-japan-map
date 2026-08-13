@@ -44,15 +44,26 @@ final class Visit {
     /// 現在も居住中か。true なら `residenceEndDate` は nil。
     var isResidenceOngoing: Bool = false
     var note: String = ""
-    /// 旅行スタイル ID。
+    /// 旅行スタイル ID（正）。
     /// - プリセット: `TravelStylePreset.rawValue` ("solo" / "business" …)
     /// - ユーザー定義: `"u:" + UUID.uuidString`
     /// - 未選択: nil。レガシー互換で文字列 `"none"` も未選択として扱う
     ///
-    /// - Important: SwiftData 上のカラムは旧 `VisitTag?` と同一の `ZTAG VARCHAR`
-    ///   (rawValue 生格納) なので、プロパティ名を変えない限りマイグレーションは不要。
-    ///   `@Attribute(originalName:)` は名前も型表現も変わらないため付けない。
-    var tag: String?
+    /// - Important: 参照は `effectiveStyleID`、書き込みは `setStyleID(_:)` を経由すること。
+    ///   直接代入すると旧 `tag` が残り、フォールバックで古いスタイルが復活する。
+    var styleID: String?
+
+    /// 【移行元・書き込み禁止】旧スタイル ID。
+    ///
+    /// CloudKit 上の `CD_tag` は BYTES で確定しているため、型を合わせる目的で
+    /// `VisitTag?` (enum) のまま保持する。詳細な経緯は `VisitTag` のコメントを参照。
+    ///
+    /// - Important: 新規保存では書き込まない。`VisitStyleIDMigration` が `styleID` へ
+    ///   転記し、スタイル変更時は `setStyleID(_:)` が nil にクリアする。
+    ///   写真の `photoFilenames` と同じく、移行完了確認後に別リリースで削除する。
+    /// - Warning: `@Attribute(originalName:)` は付けないこと。CloudKit 連携ストアでは
+    ///   属性のリネーム自体が禁止されており、名前を変えると `CD_tag` との対応も崩れる。
+    var tag: VisitTag?
     /// 写真ファイル名（Documents/Photos/ に保存）
     var photoFilename: String?
     /// サムネイル画像データ（リスト表示用、300px JPEG）
@@ -87,7 +98,7 @@ final class Visit {
     init(prefectureName: String, prefectureID: Int = 0,
          prefectureIDs: [Int] = [],
          startDate: Date, endDate: Date? = nil,
-         note: String = "", tag: String? = nil,
+         note: String = "", styleID: String? = nil,
          kind: VisitKind = .travel,
          residenceEndDate: Date? = nil,
          isResidenceOngoing: Bool = false,
@@ -101,7 +112,8 @@ final class Visit {
         self.startDate          = startDate
         self.endDate            = endDate
         self.note               = note
-        self.tag                = tag
+        // 旧 tag には書き込まない (CD_tag は BYTES 固定の移行元。VisitTag を参照)
+        self.styleID            = styleID
         self.kind               = kind
         self.residenceEndDate   = residenceEndDate
         self.isResidenceOngoing = isResidenceOngoing
@@ -132,10 +144,28 @@ final class Visit {
     }
 
     /// スタイル ID の安全なアクセス。未選択（nil / レガシー `"none"`）は nil に正規化する。
+    ///
+    /// 移行前のレコード（`styleID` が空で旧 `tag` に値が残っている）も拾う。
+    /// `effectivePrefectureIDs` が `prefectureID` にフォールバックするのと同じ考え方で、
+    /// `VisitStyleIDMigration` 実行前や旧バージョン端末から CloudKit 経由で降ってきた
+    /// 直後にスタイル表示が消えるのを防ぐ。
     var effectiveStyleID: String? {
         guard !isDeleted else { return nil }
-        guard let tag, tag != TravelStyleID.noneSentinel else { return nil }
-        return tag
+        guard let raw = styleID ?? tag?.rawValue,
+              raw != TravelStyleID.noneSentinel else { return nil }
+        return raw
+    }
+
+    /// 旅行スタイルを設定し、旧 `tag` をクリアする。
+    ///
+    /// 旧 `tag` を残したまま `styleID` だけを nil にすると、`effectiveStyleID` の
+    /// フォールバックが旧値を拾って「スタイルを外したのに復活する」状態になる。
+    /// さらに `VisitStyleIDMigration` の移行条件 (`styleID == nil && tag != nil`) にも
+    /// 合致して次回起動で書き戻されるため、解除が永久にできなくなる。
+    /// 書き込みは `setPrefectureIDs(_:)` と同様に必ずこのメソッドへ集約すること。
+    func setStyleID(_ id: String?) {
+        styleID = id
+        tag = nil
     }
 
     var effectiveMood: VisitMood {

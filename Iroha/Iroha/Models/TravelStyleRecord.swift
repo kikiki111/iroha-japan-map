@@ -51,7 +51,7 @@ final class TravelStyleRecord {
 
     var isPresetOverride: Bool { !presetKey.isEmpty }
 
-    /// `Visit.tag` に格納される ID
+    /// `Visit.styleID` に格納される ID
     var styleID: String {
         isPresetOverride ? presetKey : TravelStyleID.custom(id)
     }

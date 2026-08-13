@@ -6,7 +6,7 @@
 
 import SwiftUI
 
-/// `Visit.tag` に格納される ID の規約
+/// `Visit.styleID` に格納される ID の規約
 enum TravelStyleID {
     /// 旧 `VisitTag.none` の rawValue。既存レコードに実在するため未選択として扱い続ける。
     ///
@@ -29,7 +29,7 @@ enum TravelStyleID {
 /// - Note: protocol ではなく struct にしている。`ForEach` / `Set` / `Menu` の selection に
 ///   載せるため `Identifiable + Hashable` が要るが、existential では型消去で詰まるため。
 struct TravelStyle: Identifiable {
-    /// `Visit.tag` に格納される ID。プリセットは rawValue、カスタムは `"u:UUID"`
+    /// `Visit.styleID` に格納される ID。プリセットは rawValue、カスタムは `"u:UUID"`
     let id: String
     let name: String
     let iconName: String

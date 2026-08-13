@@ -63,8 +63,11 @@ enum TravelStyleStore {
                              detachFrom visits: [Visit],
                              context: ModelContext) throws {
         let styleID = record.styleID
-        for visit in visits where visit.tag == styleID {
-            visit.tag = nil
+        // 旧 `tag` 側にしか値がない未移行レコードも拾うため `effectiveStyleID` で判定し、
+        // `setStyleID(nil)` で両方クリアする。旧 `tag` を残すとフォールバックで
+        // 削除済みスタイルが復活する。
+        for visit in visits where visit.effectiveStyleID == styleID {
+            visit.setStyleID(nil)
         }
         context.delete(record)
         try context.save()

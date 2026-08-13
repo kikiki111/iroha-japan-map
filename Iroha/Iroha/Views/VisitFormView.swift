@@ -1696,7 +1696,7 @@ struct VisitFormView: View {
             visit.dateAccuracy = computedDateAccuracy
             visit.residenceEndDate = computedResidenceEndDate
             visit.isResidenceOngoing = computedIsOngoing
-            visit.tag = computedTag
+            visit.setStyleID(computedTag)
             visit.mood = computedMood
             visit.transports = computedTransports
             visit.note = memo
@@ -1713,7 +1713,7 @@ struct VisitFormView: View {
                 startDate: normalizedStartDate,
                 endDate: computedEndDate,
                 note: memo,
-                tag: computedTag,
+                styleID: computedTag,
                 kind: selectedKind,
                 residenceEndDate: computedResidenceEndDate,
                 isResidenceOngoing: computedIsOngoing,

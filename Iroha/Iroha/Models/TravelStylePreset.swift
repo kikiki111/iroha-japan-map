@@ -12,7 +12,7 @@ import Foundation
 /// 全端末が同一の静的テーブルを持つため、CloudKit 上での seed 重複が原理的に起きない。
 /// ユーザーは非表示にできるだけで、名前・色・アイコンは変更できない。
 ///
-/// - Warning: rawValue は `Visit.tag` に永続化される。既存 key の変更・再利用は禁止。
+/// - Warning: rawValue は `Visit.styleID` に永続化される。既存 key の変更・再利用は禁止。
 enum TravelStylePreset: String, CaseIterable {
     // 既存 4 種（rawValue を変えないこと）
     case solo    = "solo"
