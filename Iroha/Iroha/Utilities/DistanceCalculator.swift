@@ -32,14 +32,29 @@ enum DistanceCalculator {
 
         for trip in trips {
             let sorted = trip.visits.sorted { $0.startDate < $1.startDate }
-            let stops: [(lat: Double, lon: Double)] = sorted.compactMap { visit in
-                if let lat = visit.locationLatitude, let lon = visit.locationLongitude {
+            // 1 レコードに複数県がある場合は登録順に経由地を展開する。
+            // 位置情報は 1 レコードに 1 組しか持てないため先頭県の座標として扱い、
+            // 2 県目以降は県の代表座標で補完する。
+            let stops: [(lat: Double, lon: Double)] = sorted.flatMap { visit -> [(lat: Double, lon: Double)] in
+                let pinned: (lat: Double, lon: Double)? = {
+                    guard let lat = visit.locationLatitude, let lon = visit.locationLongitude else { return nil }
                     return (lat, lon)
+                }()
+                let ids = visit.effectivePrefectureIDs
+                guard !ids.isEmpty else {
+                    // ID 未 backfill (CloudKit 同期直後など) の記録。位置情報か、
+                    // 旧 prefectureName の名前一致で拾って経由地から落とさない。
+                    if let pinned { return [pinned] }
+                    guard let pref = prefectures.first(where: { $0.name == visit.prefectureName })
+                    else { return [] }
+                    return [(pref.latitude, pref.longitude)]
                 }
-                if let pref = prefectures.first(where: { $0.name == visit.prefectureName }) {
+
+                return ids.enumerated().compactMap { index, id -> (lat: Double, lon: Double)? in
+                    if index == 0, let pinned { return pinned }
+                    guard let pref = prefectures.first(where: { $0.id == id }) else { return nil }
                     return (pref.latitude, pref.longitude)
                 }
-                return nil
             }
             guard let first = stops.first, let last = stops.last else { continue }
 

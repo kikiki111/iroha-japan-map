@@ -157,7 +157,31 @@ struct SettingsView: View {
                 appearanceRow
                 Divider().padding(.leading, 50)
                 memoryNotificationRow
+                Divider().padding(.leading, 50)
+                travelStyleRow
             }
+        }
+    }
+
+    private var travelStyleRow: some View {
+        NavigationLink(destination: TravelStyleSettingsView()) {
+            HStack(spacing: 10) {
+                settingsIcon(icon: "tag")
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("旅行スタイル")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundColor(.irohaSumi)
+                    Text("表示するスタイルの切り替えと追加")
+                        .font(.system(size: 11))
+                        .foregroundColor(.irohaSumi3)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.irohaSumi3)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
         }
     }
 
@@ -327,6 +351,10 @@ struct SettingsView: View {
         UserDefaults.standard.removeObject(forKey: "appearance_mode")
         UserDefaults.standard.removeObject(forKey: "last_backup_date")
         UserDefaults.standard.removeObject(forKey: "show_memory_card")
+        CompanionSuggestionStore.clear()
+        // 旅行スタイルのプリセット非表示とユーザー定義を破棄する。
+        // resetAll() 側には入れない (アラート文言が記録・写真・マイルストーンに限っているため)。
+        TravelStyleStore.clear(context: modelContext)
         appearanceMode = 0
     }
 
@@ -356,52 +384,32 @@ struct SettingsView: View {
 
     // MARK: - Components
 
+    // 実体は Views/Components/SettingsComponents.swift。
+    // サブ画面 (TravelStyleSettingsView 等) と見た目を共有するため部品側に移した。
+
     private func sectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 13, weight: .bold))
-            .foregroundColor(.irohaSumi3)
-            .tracking(2)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 20)
-            .padding(.top, 16)
-            .padding(.bottom, 5)
+        SettingsSectionHeader(title)
     }
 
     private func settingsGroup<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(spacing: 0) {
-            content()
-        }
-        .background(Color.irohaCard)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.irohaWashi3, lineWidth: 0.5))
-        .padding(.horizontal, 14)
+        SettingsGroup { content() }
     }
 
     private func settingsRow(icon: String?, iconBg: (any ShapeStyle)?, label: String, value: String) -> some View {
-        HStack(spacing: 10) {
-            if let icon, let bg = iconBg as? Color {
-                settingsIcon(icon: icon, bg: bg)
-            } else if let icon, iconBg != nil {
-                settingsIcon(icon: icon)
-            }
-            Text(label)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundColor(.irohaSumi)
-            Spacer()
+        SettingsRowLayout(
+            icon: iconBg == nil ? nil : icon,
+            iconBg: (iconBg as? Color) ?? .clear,
+            label: label
+        ) {
             Text(value)
                 .font(.system(size: 13))
                 .foregroundColor(.irohaSumi3)
                 .monospacedDigit()
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
     }
 
     private func settingsIcon(icon: String, bg: Color = .clear) -> some View {
-        Image(systemName: icon)
-            .font(.system(size: 15))
-            .foregroundColor(.irohaSumi2)
-            .frame(width: 26, height: 26)
+        SettingsIcon(icon: icon, bg: bg)
     }
 }
 

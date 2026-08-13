@@ -30,6 +30,19 @@ struct IrohaStatsBar: View {
                     .foregroundColor(.irohaSumi3)
                     .padding(.bottom, 5)
                 Spacer()
+                // 居住県がある場合のみ表示（0 件のときは従来どおりの見た目）。
+                // 隣の達成率と同じ 13pt に揃え、色だけ金茶にして区別する。
+                if stats.residenceCount > 0 {
+                    HStack(spacing: 3) {
+                        Image(systemName: "house")
+                            .font(.system(size: 11))
+                        Text(verbatim: "\(stats.residenceCount)")
+                            .font(.system(size: 13))
+                    }
+                    .foregroundColor(.irohaSumikaDk)
+                    .padding(.bottom, 5)
+                    .accessibilityLabel("住んだ県 \(stats.residenceCount)")
+                }
                 Text(String(format: "%.0f%%", ratio * 100))
                     .font(.system(size: 13))
                     .foregroundColor(.irohaSumi3)

@@ -51,14 +51,36 @@ ContentView
 - CloudKit 同期対象から外すことで、複数端末での seed 重複・unique 制約問題を回避
 
 ### Visit（SwiftData @Model — CloudKit 同期対象 / Phase 6 で有効化）
-- prefectureName, prefectureID（Prefecture.id への参照キー）
-- startDate, endDate, note
-- tag: VisitTag?（日帰り / 宿泊 / 居住）
+- prefectureIDs: [Int]（訪問した Prefecture.id の配列。**訪問先の正**。訪問順・重複なし。1 レコードで複数県を記録できる）
+- prefectureName, prefectureID（**先頭県のミラー**。旧バージョンアプリとの CloudKit 相互運用と `TripDetector.chronological` のタイブレーカーが依存するため空にしない）
+  - 更新は必ず `setPrefectureIDs(_:)` を経由し、`prefectureIDs.first == prefectureID` の不変条件を保つ
+  - 参照は `effectivePrefectureIDs` / `effectivePrefectureNames` に一本化する（配列が空の旧レコードは prefectureID にフォールバックするため、migration 前でも集計から消えない）
+  - 表示は `prefectureDisplayName`（「京都府 → 大阪府 → 兵庫県」）/ `prefectureDisplayName(limit:)`（超過分を「ほか N 県」に畳む）
+  - 居住（`kind == .residence`）は常に 1 県
+- kind: VisitKind?（旅行 / 居住。nil = 旧データ → effectiveKind で .travel に倒す）
+- startDate（旅行の開始日 / 居住の開始日）, endDate（**旅行専用**、nil = 日帰り）, note
+- residenceEndDate: Date?（**居住専用**の終了日）, isResidenceOngoing: Bool（現在も居住中）
+  - endDate と residenceEndDate を分けているのは、nil の意味が「日帰り」と「継続中」で衝突するため
+- dateAccuracy: DateAccuracy?（**旅行専用**の日付粒度。nil = 旧データ → effectiveDateAccuracy で .day に倒す）
+  - 昔の旅行など日付が曖昧な記録用。`.month` / `.year` では startDate に代表日（月末 / 12/31、未来日は今日でクランプ）を格納する
+  - startDate を Date のまま保つことで、`@Query(sort: \Visit.startDate)` 8 箇所と年フィルタを無改変で通せる
+  - 居住は residencePeriodText で既に年月粒度の表示を持つため対象外（常に .day 扱い）
+- styleID: String?（旅行スタイル ID の**正**。kind と直交する軸で、居住でも選べる。プリセットは `TravelStylePreset.rawValue`、ユーザー定義は `"u:<UUID>"`。未選択は nil で、レガシー文字列 `"none"` も未選択として扱う）
+  - 参照は `effectiveStyleID`、書き込みは `setStyleID(_:)` を経由する。直接代入すると旧 `tag` が残り、フォールバックで解除済みスタイルが復活する
+- tag: VisitTag?（**移行元・書き込み禁止**。`VisitStyleIDMigration` が `styleID` へ転記する）
+  - 82e8657 で `VisitTag?` → `String?` に変えたところ、CloudKit の import が全件失敗して同期パイプラインが停止した（NSCocoaError 134420: desired NSString / given NSConcreteData）。SwiftData は enum を Data にアーカイブして送るため **CloudKit 上の `CD_tag` は BYTES で確定**しており、ローカル SQLite が双方とも `ZTAG VARCHAR`（rawValue 平文）で済んでいたのとは事情が違う
+  - **CloudKit のフィールド型は後から変更できない**ため、`tag` を enum に戻して `CD_tag` と型を合わせ、正の ID は新設した `styleID`（`CD_styleID` = STRING）に移した
+  - 転記後も `tag` は消さない。旧バージョンアプリ（1.0.5）は `styleID` を知らず `tag` だけを見るため、消すと旧端末でバッジが失われる。スタイルを変更・解除したときだけ `setStyleID(_:)` がクリアする
+  - `@Attribute(originalName:)` は付けない。CloudKit 連携ストアでは属性のリネーム自体が禁止されている
 - mood: VisitMood?（楽 / 癒 / 感 / 驚 / 懐 / 静）
 - transports, tripName, companions, location, locationLatitude, locationLongitude
 - photos: [VisitPhoto]?（@Relationship, cascade delete, optional 必須）
 - 旧 photoFilenames / photoThumbnails / photoFilename / photoThumbnail（PhotoMigration 完了確認まで併存）
 - 互換ヘルパー: totalPhotoCount, sortedPhotoThumbnails, sortedPhotoFilenames, sortedPhotos
+- 居住ヘルパー: effectiveKind, isResidence, residencePeriodText, residenceDurationText
+- 都道府県ヘルパー: effectivePrefectureIDs, effectivePrefectureNames, prefectureDisplayName, prefectureDisplayName(limit:), setPrefectureIDs(_:)
+- 日付精度ヘルパー: effectiveDateAccuracy, isDateAmbiguous, nightCount（曖昧な日付・居住では nil）
+- 新フィールド追加時は CloudKit 互換のため **optional か default 値付き** が必須（`kind` / `dateAccuracy` は optional、`isResidenceOngoing` は default false）。lightweight migration で自動処理されるため専用 Migration は不要
 
 ### VisitPhoto（SwiftData @Model — CloudKit 同期対象 / Phase 6 で有効化）
 - id: UUID
@@ -71,18 +93,43 @@ ContentView
 
 ### VisitStats（派生集計 ヘルパー）
 - visits 群を引数に取り、prefectureID → count の辞書を生成
-- API: count(for:), isVisited(_:), isAllVisited, visitedPrefectures, visitsByRegion(), isRegionConquered(_:), color(for:), colorHex(for:), signature
+- 1 レコードが複数県を持つ場合は **各県に 1 ずつ加算**（全県を等しくカウント）。同一レコード内の県重複は `effectivePrefectureIDs` が除去済み
+- `groupedByPrefectureID(_:)`（static）— 任意の Visit 群を県 ID でグルーピングする多対多版。`Dictionary(grouping:by:)` は 1 レコード 1 キー前提で使えないため、母集団を限定した集計（バッジ判定・期間フィルタ後の最多県）はこちらを使う。母集団が呼び出し側ごとに違うのでインスタンスに辞書を持たせず引数で受ける
+- **居住は count に加算しない**（5 年住んだのを「1 回訪問」としない）が、`visitedIDs` には含める（住んだ県を未訪問扱いにしない）
+- API: count(for:), isVisited(_:), isResidence(_:), residenceCount, isAllVisited, visitedPrefectures, visitsByRegion(), isRegionConquered(_:), color(for:), colorHex(for:), signature
+- `colorHex(for:)` の優先順位は **旅行 > 居住**。淡い金茶 `#E8D9A8` を返すのは「居住あり かつ 旅行 0 回」の県のみで、旅行があれば訪問回数どおりの紫になる（地図から旅行回数を読めるようにするため）
+- `signature` には residenceIDs も混ぜる（居住のみの変更で onChange が発火しなくなるため）
 - View 階層で 1 度作ってサブビューに渡す
 
 ### Trip（非永続化 — TripDetector で動的生成）
 - visits: [Visit]
 - computed: startDate, endDate, isSingleVisit, prefectureNames
+- `prefectureNames` は各 Visit の `effectivePrefectureNames` を flatMap して重複除去（レコード内の登録順 = 訪問順を保つ）
+- `isSingleVisit` は「**記録数** 1」であって県数ではない。1 レコードに複数県を登録できるため `isSingleVisit == true && prefectureNames.count > 1` はあり得る（TimelineView の単票分岐はこの前提で県名に `prefectureDisplayName` を使う）
 
 ### Region（enum）
 hokkaido, tohoku, kanto, chubu, kinki, chugoku, shikoku, kyushu
 
-### VisitTag（enum）
-none, dayTrip, stay, lived
+### VisitKind（enum）
+travel（旅行）, residence（居住）
+- `.none` を持たない 2 値。未設定は `Visit.kind == nil`（旧データ）で表し、`effectiveKind` が `.travel` を返す
+
+### 旅行スタイル（プリセット + ユーザー定義）
+
+固定 enum ではなく、静的プリセットと永続レコードを 1 つの値型に投影する構成。
+
+| 型 | 役割 |
+|---|---|
+| `TravelStylePreset`（enum） | アプリ標準の 5 種: solo（一人旅）, family（家族旅行）, couple（恋人旅行）, friends（友達旅行）, other（その他）。legacy 3 種（dayTrip, stay, lived）は表示専用で選択肢に出さない |
+| `TravelStyleRecord`（@Model） | ユーザーが追加したカスタム行と、プリセットを非表示にしたときだけ作るオーバーレイ行。`isHidden` はどちらの行でも使い、カスタムスタイルの表示・非表示も同じフラグで表す |
+| `TravelStyle`（struct） | 上記 2 つを投影した UI 用の統一型。`id` / `name` / `iconName` / `palette` |
+| `TravelStyleCatalog`（struct） | プリセット + カスタムを統合した参照テーブル。`TravelStyleCatalogProvider` が `@Query` の単一オーナーとなり Environment で配る |
+| `TravelStylePalette`（enum） | 伝統色ベースの配色。ユーザー選択可能な 12 色を含む |
+| `TravelStyleStore`（enum） | 書き込み専用 CRUD。読み取りは `@Query` + カタログが担う |
+
+- **プリセットは SwiftData に seed しない。** `Prefecture` と同じ理由（複数端末での seed 重複回避）
+- ユーザー定義は CloudKit 同期する。`Visit.styleID` が同期対象である以上、定義だけ端末ローカルに置くと他端末でバッジが消えるため
+- カスタムスタイルの削除時は、該当 Visit を `setStyleID(nil)` で外してから 1 トランザクションで消す（記録自体は削除しない）。判定は `effectiveStyleID` で行い、旧 `tag` にしか値がない未移行レコードも拾う
 
 ### VisitMood（enum — 伝統色ベース）
 none, tanoshi(楽/桜), iyashi(癒/若草), kandou(感/藤), odoroki(驚/山吹), natsukashi(懐/茜), shizuka(静/浅葱)
@@ -101,10 +148,22 @@ Prefecture（SwiftData）←→ MapViewModel → JapanMapView（WKWebView）
 6. シート閉じ後に初訪問アニメーション（animateFill）を発火
 
 ## 旅ルート自動検出アルゴリズム（TripDetector）
-1. 全 Visit を startDate でソート
+0. **居住記録（`isResidence`）を入口で除外**
+   （居住は期間が数年に及ぶため、3 日ルールに混ぜると居住期間中の全旅行が 1 つの巨大 Trip に併合される。
+   旅数・移動距離・タイムライン・バッジ 3 種の共通防御点）
+0'. **日付が曖昧な記録（`isDateAmbiguous`）を確定日付の群から分離**
+   （代表日が実際の訪問日と一致しないため。時系列の途中に混ざると、その前後にある
+   確定日付どうしの連結まで分断してしまう。曖昧な記録は常に単独 Trip とする）
+1. 確定日付の Visit を startDate でソート（同一日は県名をタイブレーカーに。この県名は
+   `prefectureName` = 先頭県のミラーを見ており、`setPrefectureIDs(_:)` が維持している）
 2. 前の Visit の effectiveEndDate から次の Visit の startDate が 3日以内 → 同じ旅行グループ
 3. グループを Trip オブジェクトに変換（FNV-1a ハッシュで確定的 UUID 生成）
+   - seed はグループを構成する `persistentModelID` のハッシュ。「県名 + 代表日」だと
+     同一県・同一年の曖昧な記録（どちらも 12/31 に丸まる）で Trip.id が衝突し、
+     `sheet(item:)` が片方しか開けなくなるため
 4. Trip を月別にグルーピングして TimelineView に表示
+   - 年しか分からない記録は「時期不明」セクションとして各年の末尾に集約する
+     （代表日 12/31 のままだと降順ソートで年の先頭に来てしまうため、比較関数で明示的に後段へ回す）
 
 ## マイルストーンシステム
 - MapViewModel.detectMilestone() で訪問保存後に検出
@@ -116,7 +175,8 @@ Prefecture（SwiftData）←→ MapViewModel → JapanMapView（WKWebView）
 - TripDetector — 旅行グループ自動検出（3日ルール）
 - VisitPhotoStore — 写真の保存・取得・削除（VisitPhoto 経由、2048px/5MB に強制縮小、新旧ハイブリッドロード）
 - PhotoStorageManager — 旧 Documents/Photos/ への読み書き（Phase A 移行期間中に PhotoMigration / 互換ヘルパーから利用、Phase B 完了で削除予定）
-- VisitPrefectureMigration — 既存 Visit の prefectureID を prefectureName から backfill（起動時 1 回、scan ベース判定で冪等）
+- VisitPrefectureMigration — 都道府県フィールドの整備（起動時 1 回、scan ベース判定で冪等）。phase 1 = prefectureID を prefectureName から backfill、phase 2 = prefectureIDs を prefectureID から seed し先頭県ミラーの不整合（旧バージョンアプリが CloudKit 経由で訪問先を変更したケース）を単一県レコードに限り修復。phase 2 は `#Predicate` で配列の isEmpty を評価できないため全件 fetch + in-memory フィルタ
+- VisitStyleIDMigration — 旧 `Visit.tag`（`VisitTag?`）を `Visit.styleID`（`String?`）へ転記（起動時 1 回、`styleID == nil && tag != nil` の scan ベース判定で冪等）。旧 `.none` は未選択の意味なので転記しない。旧バージョンアプリ互換のため転記後も `tag` は残す
 - PhotoMigration — 既存 Documents/Photos/ ファイルを VisitPhoto に転記（写真単位冪等、旧データは Phase B まで保持）
 - CloudSyncStatusObserver — CloudKit 同期状態の集約・公開（CKAccountStatus + NWPathMonitor + UserDefaults）
 - MemoryNotificationManager — 「今日の記憶」通知スケジュール（UNCalendarNotificationTrigger）
@@ -124,7 +184,15 @@ Prefecture（SwiftData）←→ MapViewModel → JapanMapView（WKWebView）
 
 ## CloudKit 同期（Phase 6 で有効化予定）
 - ModelContainer の `cloudKitDatabase: .private("iCloud.com.qumo.Iroha")` で有効化
-- Schema は [Visit.self, VisitPhoto.self]（Prefecture は static struct、同期対象外）
+- Schema は [Visit.self, VisitPhoto.self, TravelStyleRecord.self]（Prefecture と旅行スタイルのプリセットは静的テーブル、同期対象外）
+- `TravelStyleRecord` は新しい CKRecord タイプなので、**リリース前に CloudKit Dashboard で Production へスキーマをデプロイする**
+- `Visit.prefectureIDs`（`CD_prefectureIDs`）と `Visit.styleID`（`CD_styleID`）も新規フィールドなので同様に **Production へのスキーマデプロイが必要**。忘れると本番のみ複数県とスタイルが他端末に同期しない
+- 旧バージョンアプリは `prefectureIDs` を知らないが、`prefectureName` / `prefectureID` に先頭県をミラーしているため記録が消えることはない（先頭 1 県の記録として見える）
+- 既存 @Model へのフィールド追加（`Visit.dateAccuracy` = `CD_dateAccuracy` など）も同じくデプロイが要る。
+  Development はスキーマが自動生成されるため Debug ビルドの検証は素通りするが、Production 未反映のまま
+  Release を配布すると、そのフィールドを含む Visit の push が丸ごと失敗する
 - ユーザの ON/OFF 設定: UserDefaults `cloud_sync_enabled`
 - 初回起動時: CloudSyncOnboardingView で選択
 - ON/OFF 切替は ModelContainer の起動時固定のため、変更後はアプリ再起動を要求
+- **enum プロパティの型を後から変えない。** SwiftData は enum を Data にアーカイブして送るため CloudKit 上は BYTES で確定する。String などに変えると import が型不一致で全件失敗し（NSCocoaError 134420）、import が詰まると export も動かず同期パイプライン全体が止まる。CloudKit のフィールド型は変更できないので、**別名の新プロパティを作って移行する**（`Visit.tag` → `Visit.styleID` の実例を参照）
+- 同期の停止はユーザーから見えない。`CloudSyncStatusObserver` は `CKAccountStatus` とネット接続しか見ておらず、import/export の失敗を検知しない。スキーマを変えたリリースでは `ANSCKEVENT` テーブル（type: 0=setup / 1=import / 2=export）で成否を実測すること

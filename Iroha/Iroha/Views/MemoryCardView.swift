@@ -21,7 +21,12 @@ struct MemoryCardView: View {
         let today = calendar.dateComponents([.month, .day], from: Date())
         let currentYear = calendar.component(.year, from: Date())
 
-        return visits.compactMap { visit in
+        // 居住は除外。引っ越し日が今日の月日と一致しただけで
+        // 「N 年前の今日の旅」として旅行と同列に出てしまうため。
+        return visits.filter { !$0.isResidence }.compactMap { visit in
+            // 日付が曖昧な記録も除外。代表日 (月末 / 12/31) は実際の訪問日ではないため、
+            // 「今日と同じ月日」の判定に紛れ込ませない。
+            guard !visit.isDateAmbiguous else { return nil }
             let comp = calendar.dateComponents([.month, .day, .year], from: visit.startDate)
             guard comp.month == today.month, comp.day == today.day,
                   let visitYear = comp.year, visitYear < currentYear else { return nil }
@@ -129,17 +134,20 @@ struct MemoryCardView: View {
             }
 
             VStack(alignment: .leading, spacing: 3) {
-                let dateString = memory.visit.startDate.formatted(
-                    .dateTime.year().month(.twoDigits).day(.twoDigits)
-                        .locale(Locale(identifier: "ja_JP"))
+                let dateString = VisitDateFormat.compactText(
+                    memory.visit.startDate,
+                    accuracy: memory.visit.effectiveDateAccuracy
                 )
                 Text("\(dateString) \u{00B7} \(memory.yearsAgo)年前の今日")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundColor(.irohaFuji)
 
-                Text(memory.visit.prefectureName)
+                // カードは高さ固定。複数県でも 1 行に収める
+                Text(memory.visit.prefectureDisplayName)
                     .font(.system(size: 18, weight: .light, design: .serif))
                     .foregroundColor(.irohaSumi)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
 
                 if !memory.visit.note.isEmpty {
                     Text(memory.visit.note)

@@ -14,11 +14,22 @@ struct VisitFormView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.travelStyleCatalog) private var styleCatalog
 
-    @State private var selectedPrefectureName = ""
+    /// 選択中の都道府県 ID。配列順が訪問順になり、表示の「→」連結順に対応する。
+    /// 居住 (`isResidenceMode`) では常に 1 要素。
+    @State private var selectedPrefectureIDs: [Int] = []
+    @State private var selectedKind: VisitKind = .travel
     @State private var visitDate = Date()
     @State private var endDate = Date()
-    @State private var selectedTag: VisitTag = .none
+    /// 旅行日の入力粒度。居住では使わない（`effectiveFormAccuracy` 参照）。
+    @State private var dateAccuracy: DateAccuracy = .day
+    /// 居住の終了日。`isOngoingResidence` が true のときは保存対象外。
+    @State private var residenceEndDate = Date()
+    @State private var isOngoingResidence = false
+    /// 選択中の旅行スタイル ID。カタログで解決できない ID（他端末で作成し未同期など）でも
+    /// 値は捨てずに保持する。同期完了後に自動で表示が戻る。
+    @State private var selectedStyleID: String?
     @State private var selectedMood: VisitMood = .none
     @State private var selectedTransports: Set<VisitTransport> = []
     @State private var memo = ""
@@ -29,6 +40,8 @@ struct VisitFormView: View {
     @State private var removedFilenames: [String] = []
     @State private var companions: [String] = []
     @State private var companionInput = ""
+    /// 候補チップから非表示にした同行者名 (記録側の companions には影響しない)
+    @State private var hiddenCompanions: Set<String> = CompanionSuggestionStore.hidden()
     @State private var location = ""
     @State private var locationLatitude: Double?
     @State private var locationLongitude: Double?
@@ -49,12 +62,32 @@ struct VisitFormView: View {
     @State private var skipNextEndDateChange = false
 
     private var isEditing: Bool { editingVisit != nil }
-    private var isPrefectureLocked: Bool { prefecture != nil }
     private let maxPhotoCount = 10
+    /// 1 記録あたりの都道府県上限。行ヘッダのサマリと CloudKit レコードサイズを
+    /// 現実的な範囲に保つための上限。
+    private let maxPrefectureCount = 10
+    /// 行ヘッダのサマリで連結表示する県数。超過分は「ほか N 県」に畳む。
+    private let prefectureSummaryLimit = 2
+    /// 年ホイールの下限。旅行記録として現実的な範囲に絞る。
+    private let earliestSelectableYear = 1940
+    private static let monthsInYear = Array(1...12)
+
+    /// 年ホイールの選択肢（新しい年が先頭）。上限は今年。
+    private var selectableYears: [Int] {
+        let currentYear = Calendar.current.component(.year, from: Date())
+        guard currentYear >= earliestSelectableYear else { return [currentYear] }
+        return Array((earliestSelectableYear...currentYear).reversed())
+    }
 
     private enum FormSection: Hashable {
-        case prefecture, date, tag, location, transport, companion, mood, photo
+        case kind, prefecture, date, tag, location, transport, companion, mood, photo
     }
+
+    private var isResidenceMode: Bool { selectedKind == .residence }
+
+    /// 表示・保存に使う実効精度。
+    /// 居住は `residencePeriodText` で既に年月粒度の表示を持つため、精度の概念を適用しない。
+    private var effectiveFormAccuracy: DateAccuracy { isResidenceMode ? .day : dateAccuracy }
 
     private enum DateField {
         case start, end
@@ -64,23 +97,40 @@ struct VisitFormView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 0) {
+                    kindRow
+                    divider
                     prefectureRow
+                    // 旅行スタイル (一人旅 / 家族旅行 …) は選択肢がすべて旅行前提のため
+                    // 居住では出さない
+                    if !isResidenceMode {
+                        divider
+                        tagRow
+                    }
                     divider
-                    tagRow
-                    divider
-                    dateRow
+                    if isResidenceMode {
+                        residencePeriodRow
+                    } else {
+                        dateRow
+                    }
                     divider
                     locationRow
                     divider
                     photoRow
-                    divider
-                    transportRow
+                    // 移動手段・旅行名は旅行専用
+                    if !isResidenceMode {
+                        divider
+                        transportRow
+                    }
                     divider
                     companionRow
-                    divider
-                    moodRow
-                    divider
-                    tripNameRow
+                    // ムードは「その時の気分」の単発スタンプで、
+                    // 数年間の暮らしを 1 つで表すのは無理があるため居住では出さない
+                    if !isResidenceMode {
+                        divider
+                        moodRow
+                        divider
+                        tripNameRow
+                    }
                     divider
                     memoRow
 
@@ -92,7 +142,7 @@ struct VisitFormView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .background(Color.irohaWashi)
-            .navigationTitle("旅の記録")
+            .navigationTitle(isResidenceMode ? "住んだ記録" : "旅の記録")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -106,7 +156,7 @@ struct VisitFormView: View {
                         Button("保存") { save() }
                             .font(.system(size: 16, weight: .bold))
                             .foregroundColor(.irohaFujiDk)
-                            .disabled(selectedPrefectureName.isEmpty)
+                            .disabled(selectedPrefectureIDs.isEmpty)
                     }
                 }
             }
@@ -150,14 +200,186 @@ struct VisitFormView: View {
 
     // MARK: - Rows
 
+    private var kindRow: some View {
+        VStack(spacing: 0) {
+            rowHeader(
+                icon: selectedKind.iconName,
+                label: "種別",
+                value: selectedKind.displayName,
+                valueColor: selectedKind.foregroundColor,
+                section: .kind
+            )
+
+            if expandedSection == .kind {
+                kindPickerContent
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    private var kindPickerContent: some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+            ForEach(VisitKind.allCases, id: \.rawValue) { kind in
+                let isSelected = selectedKind == kind
+                Button {
+                    guard selectedKind != kind else { return }
+                    selectedKind = kind
+                    syncFieldsForKindChange(to: kind)
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        expandedSection = nil
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: kind.iconName)
+                            .font(.system(size: 13))
+                        Text(kind.displayName)
+                            .font(.system(size: 14, weight: isSelected ? .bold : .medium))
+                    }
+                    .foregroundColor(isSelected ? kind.foregroundColor : .irohaSumi3)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(isSelected ? kind.backgroundColor : Color.irohaWashi2)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(isSelected ? kind.foregroundColor.opacity(0.3) : Color.irohaWashi3, lineWidth: 0.5)
+                    )
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 14)
+    }
+
+    /// 種別切替時に、もう一方のモードで不整合になる state を揃える。
+    private func syncFieldsForKindChange(to kind: VisitKind) {
+        switch kind {
+        case .residence:
+            // 居住は residencePeriodText で既に年月粒度の表示を持つため、精度の概念を持たない。
+            // 曖昧精度のまま切り替えると「住みはじめた日」だけが代表日 (月末 / 12/31) に
+            // 丸まり、residenceEndDate と粒度が食い違って期間表示が壊れる。
+            dateAccuracy = .day
+            // 旅行の帰着日を居住終了日の初期値として引き継ぐ
+            if residenceEndDate < visitDate { residenceEndDate = max(endDate, visitDate) }
+            // 居住は 1 県のみ。旅行で複数県を選んだ後に切り替えたら先頭県だけ残す
+            if selectedPrefectureIDs.count > 1 {
+                selectedPrefectureIDs = Array(selectedPrefectureIDs.prefix(1))
+            }
+        case .travel:
+            // 居住から戻したときに endDate < visitDate の不正状態を作らない
+            if endDate < visitDate {
+                skipNextEndDateChange = true
+                endDate = visitDate
+            }
+        }
+    }
+
+    private var residencePeriodRow: some View {
+        VStack(spacing: 0) {
+            rowHeader(
+                icon: "calendar",
+                label: "期間",
+                value: formattedResidenceSummary,
+                section: .date
+            )
+
+            if expandedSection == .date {
+                residencePeriodContent
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .onChange(of: expandedSection) { _, newSection in
+            if newSection == .date { activeDateField = .start }
+        }
+    }
+
+    private var residencePeriodContent: some View {
+        VStack(spacing: 8) {
+            dateFieldRow(field: .start, label: "住みはじめた日", date: visitDate)
+            if activeDateField == .start {
+                DatePicker(
+                    "住みはじめた日",
+                    selection: $visitDate,
+                    displayedComponents: .date
+                )
+                .datePickerStyle(.graphical)
+                .tint(.irohaSumikaDk)
+                .environment(\.locale, Locale(identifier: "ja_JP"))
+                .labelsHidden()
+                .id(pickerRefreshId)
+                .onChange(of: visitDate) { oldDate, newDate in
+                    if residenceEndDate < newDate { residenceEndDate = newDate }
+                    if isUserDayTap(from: oldDate, to: newDate), !isOngoingResidence {
+                        activeDateField = .end
+                    }
+                }
+
+                pickerDoneLink
+            }
+
+            Toggle(isOn: $isOngoingResidence) {
+                Text("現在も住んでいる")
+                    .font(.system(size: 15))
+                    .foregroundColor(.irohaSumi2)
+            }
+            .tint(.irohaSumikaDk)
+            .padding(.vertical, 4)
+            .onChange(of: isOngoingResidence) { _, isOngoing in
+                if isOngoing, activeDateField == .end {
+                    activeDateField = .start
+                }
+            }
+
+            if !isOngoingResidence {
+                dateFieldRow(field: .end, label: "引っ越した日", date: residenceEndDate)
+                if activeDateField == .end {
+                    DatePicker(
+                        "引っ越した日",
+                        selection: $residenceEndDate,
+                        in: visitDate...,
+                        displayedComponents: .date
+                    )
+                    .datePickerStyle(.graphical)
+                    .tint(.irohaSumikaDk)
+                    .environment(\.locale, Locale(identifier: "ja_JP"))
+                    .labelsHidden()
+                    .id(pickerRefreshId)
+                    .onChange(of: residenceEndDate) { oldDate, newDate in
+                        if isUserDayTap(from: oldDate, to: newDate) {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                expandedSection = nil
+                            }
+                        }
+                    }
+
+                    pickerDoneLink
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 14)
+    }
+
+    private var formattedResidenceSummary: String {
+        let fmt = { (d: Date) in
+            d.formatted(.dateTime.year().month().locale(Locale(identifier: "ja_JP")))
+        }
+        if isOngoingResidence {
+            return "\(fmt(visitDate)) 〜 現在"
+        }
+        return "\(fmt(visitDate)) 〜 \(fmt(residenceEndDate))"
+    }
+
     private var prefectureRow: some View {
         VStack(spacing: 0) {
             rowHeader(
                 icon: "mappin.circle",
                 label: "都道府県",
-                value: selectedPrefectureName.isEmpty ? "選択してください" : selectedPrefectureName,
-                valueColor: selectedPrefectureName.isEmpty ? .irohaSumi3 : .irohaSumi,
-                section: isPrefectureLocked ? nil : .prefecture
+                value: prefectureSummary,
+                valueColor: selectedPrefectureIDs.isEmpty ? .irohaSumi3 : .irohaSumi,
+                lineLimit: 1,
+                // 県詳細シート経由でもロックしない (初期選択されるが他県を追加できる)
+                section: .prefecture
             )
 
             if expandedSection == .prefecture {
@@ -186,6 +408,10 @@ struct VisitFormView: View {
         }
         .onChange(of: activeDateField) { _, newField in
             guard newField == .end else { return }
+            // カレンダー (年月日) 専用の初期位置合わせ。曖昧精度のホイールは
+            // 選択中の年月をそのまま表示するので揃え直す必要がなく、
+            // 揃えると入力済みの帰着日が開始日に巻き戻ってしまう。
+            guard dateAccuracy == .day else { return }
             // 帰着日カレンダーが開始日の年月で開くように、年月が違っていたら開始日に揃える
             let calendar = Calendar.current
             let visitYM = calendar.dateComponents([.year, .month], from: visitDate)
@@ -205,20 +431,25 @@ struct VisitFormView: View {
             }
             // 帰着日 picker 操作中のユーザー日タップで旅行日セクションを閉じる。
             // ホイール式年月ピッカーで日が自動調整されたケースのみ除外する。
-            guard activeDateField == .end else { return }
+            // 曖昧精度では日成分が常に月末に張り付き isUserDayTap が誤発火するため、
+            // セクションを閉じる操作は「完了」ボタン (pickerDoneLink(for:)) に任せる。
+            guard dateAccuracy == .day, activeDateField == .end else { return }
             if isUserDayTap(from: oldDate, to: newDate) {
                 expandedSection = nil
             }
         }
     }
 
+    /// 選択中スタイルの実体。ID が解決できない場合は nil（表示は「未選択」）。
+    private var selectedStyle: TravelStyle? { styleCatalog.style(for: selectedStyleID) }
+
     private var tagRow: some View {
         VStack(spacing: 0) {
             rowHeader(
                 icon: "tag",
                 label: "旅行スタイル",
-                value: selectedTag == .none ? "未選択" : selectedTag.displayName,
-                valueColor: selectedTag == .none ? .irohaSumi3 : selectedTag.foregroundColor,
+                value: selectedStyle?.name ?? "未選択",
+                valueColor: selectedStyle?.foregroundColor ?? .irohaSumi3,
                 section: .tag
             )
 
@@ -380,7 +611,7 @@ struct VisitFormView: View {
 
     private var locationContent: some View {
         VStack(spacing: 8) {
-            TextField("場所名（例：道後温泉）", text: $location)
+            TextField(isResidenceMode ? "住んでいた場所（例：松山市）" : "場所名（例：道後温泉）", text: $location)
                 .focused($locationFieldFocused)
                 .font(.system(size: 14))
                 .padding(.horizontal, 12)
@@ -481,7 +712,7 @@ struct VisitFormView: View {
                     .foregroundColor(.irohaSumi3)
                     .frame(width: 24)
 
-                Text("同行者")
+                Text(isResidenceMode ? "同居した人" : "同行者")
                     .font(.system(size: 15))
                     .foregroundColor(.irohaSumi2)
 
@@ -515,7 +746,7 @@ struct VisitFormView: View {
     private var companionSuggestions: [String] {
         let all = Set(allVisits.flatMap { $0.companions })
         let current = Set(companions)
-        let available = all.subtracting(current)
+        let available = all.subtracting(current).subtracting(hiddenCompanions)
         if companionInput.isEmpty { return Array(available).sorted() }
         return available.filter { $0.localizedCaseInsensitiveContains(companionInput) }.sorted()
     }
@@ -525,6 +756,17 @@ struct VisitFormView: View {
         guard !name.isEmpty, !companions.contains(name) else { return }
         companions.append(name)
         companionInput = ""
+        // 非表示にした名前を手入力で入れ直したら、候補として復活させる (復元手段の確保)
+        if hiddenCompanions.contains(name) {
+            CompanionSuggestionStore.unhide(name)
+            hiddenCompanions.remove(name)
+        }
+    }
+
+    /// 候補チップから名前を非表示にする (過去の記録は変更しない)
+    private func hideCompanionSuggestion(_ name: String) {
+        CompanionSuggestionStore.hide(name)
+        hiddenCompanions.insert(name)
     }
 
     private var companionContent: some View {
@@ -554,7 +796,7 @@ struct VisitFormView: View {
 
             if !companionSuggestions.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("候補")
+                    Text("候補（長押しで削除）")
                         .font(.system(size: 11))
                         .foregroundColor(.irohaSumi3)
                     FlowLayout(spacing: 6) {
@@ -570,6 +812,13 @@ struct VisitFormView: View {
                                     .padding(.vertical, 5)
                                     .background(Color.irohaFuji.opacity(0.08))
                                     .clipShape(Capsule())
+                            }
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    hideCompanionSuggestion(name)
+                                } label: {
+                                    Label("候補から削除", systemImage: "trash")
+                                }
                             }
                         }
                     }
@@ -628,7 +877,7 @@ struct VisitFormView: View {
 
             ZStack(alignment: .topLeading) {
                 if memo.isEmpty {
-                    Text("旅の思い出を残しておこう…")
+                    Text(isResidenceMode ? "暮らしの思い出を残しておこう…" : "旅の思い出を残しておこう…")
                         .font(.system(size: 15))
                         .foregroundColor(.irohaSumi3.opacity(0.6))
                         .padding(.top, 8)
@@ -670,6 +919,13 @@ struct VisitFormView: View {
             .background(Color.irohaCard)
             .clipShape(RoundedRectangle(cornerRadius: 8))
 
+            // 選択済みチップ (訪問順)。47 チップの地方グリッドより上に置くことで、
+            // スクロールせずに選んだ順序と件数を確認できるようにする。
+            // 居住は 1 県固定なのでチップ一覧を出さない。
+            if !isResidenceMode, !selectedPrefectureIDs.isEmpty {
+                selectedPrefectureChips
+            }
+
             ForEach(Region.allCases) { region in
                 let regionPrefs = filteredPrefectures(for: region)
                 if !regionPrefs.isEmpty {
@@ -681,13 +937,10 @@ struct VisitFormView: View {
 
                         FlowLayout(spacing: 6) {
                             ForEach(regionPrefs) { pref in
-                                let isSelected = pref.name == selectedPrefectureName
+                                let isSelected = selectedPrefectureIDs.contains(pref.id)
+                                let isFull = selectedPrefectureIDs.count >= maxPrefectureCount
                                 Button {
-                                    selectedPrefectureName = pref.name
-                                    prefectureSearch = ""
-                                    withAnimation(.easeInOut(duration: 0.25)) {
-                                        expandedSection = nil
-                                    }
+                                    togglePrefecture(pref)
                                 } label: {
                                     Text(pref.name)
                                         .font(.system(size: 14))
@@ -700,6 +953,9 @@ struct VisitFormView: View {
                                             Capsule().stroke(isSelected ? Color.irohaFujiDk : Color.irohaWashi3, lineWidth: 0.5)
                                         )
                                 }
+                                // 上限到達後は未選択の県を押せなくする (居住は常に置き換えなので対象外)
+                                .disabled(!isResidenceMode && !isSelected && isFull)
+                                .opacity(!isResidenceMode && !isSelected && isFull ? 0.4 : 1)
                             }
                         }
                     }
@@ -710,52 +966,76 @@ struct VisitFormView: View {
         .padding(.bottom, 14)
     }
 
+    /// 選択済み都道府県のチップ列 (訪問順)。× で個別に外せる。
+    private var selectedPrefectureChips: some View {
+        VStack(spacing: 4) {
+            FlowLayout(spacing: 6) {
+                ForEach(selectedPrefectureIDs, id: \.self) { id in
+                    let name = Prefecture.by(id: id)?.name ?? ""
+                    HStack(spacing: 4) {
+                        Text(name)
+                            .font(.system(size: 13))
+                        Button {
+                            selectedPrefectureIDs.removeAll { $0 == id }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundColor(.irohaSumi3)
+                        }
+                        .accessibilityLabel("\(name)を選択から外す")
+                    }
+                    .foregroundColor(.irohaSumi)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.irohaWashi2)
+                    .clipShape(Capsule())
+                }
+            }
+
+            Text(verbatim: "\(selectedPrefectureIDs.count) / \(maxPrefectureCount)")
+                .font(.system(size: 11))
+                .foregroundColor(.irohaSumi3)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+
+    /// 都道府県チップのタップ処理。
+    /// 旅行は複数選択のトグル (移動手段ピッカーと同じ挙動、セクションは閉じない)。
+    /// 居住は 1 県固定なので従来どおり単一選択で、選んだらセクションを閉じる。
+    private func togglePrefecture(_ pref: Prefecture) {
+        prefectureSearch = ""
+
+        guard !isResidenceMode else {
+            selectedPrefectureIDs = [pref.id]
+            withAnimation(.easeInOut(duration: 0.25)) {
+                expandedSection = nil
+            }
+            return
+        }
+
+        if let index = selectedPrefectureIDs.firstIndex(of: pref.id) {
+            selectedPrefectureIDs.remove(at: index)
+        } else {
+            guard selectedPrefectureIDs.count < maxPrefectureCount else { return }
+            // 末尾に足すことで「選んだ順 = 訪問順」を保つ
+            selectedPrefectureIDs.append(pref.id)
+        }
+    }
+
     private var datePickerContent: some View {
         VStack(spacing: 8) {
+            accuracySegment
+
             dateFieldRow(field: .start, label: "開始日", date: visitDate)
             if activeDateField == .start {
-                DatePicker(
-                    "開始日",
-                    selection: $visitDate,
-                    displayedComponents: .date
-                )
-                .datePickerStyle(.graphical)
-                .tint(.irohaFuji)
-                .environment(\.locale, Locale(identifier: "ja_JP"))
-                .labelsHidden()
-                .id(pickerRefreshId)
-                .onChange(of: visitDate) { oldDate, newDate in
-                    let calendar = Calendar.current
-                    if newDate > endDate {
-                        let duration = calendar.dateComponents([.day], from: oldDate, to: endDate).day ?? 0
-                        skipNextEndDateChange = true
-                        endDate = calendar.date(byAdding: .day, value: max(duration, 0), to: newDate) ?? newDate
-                    }
-                    // ユーザーの日タップ（同月内 or 横スライド/月送り後）で帰着日へ遷移。
-                    // ホイール式年月ピッカーで日が自動調整されたケース（5/31→6/30 等）のみ除外する。
-                    if isUserDayTap(from: oldDate, to: newDate) {
-                        activeDateField = .end
-                    }
-                }
-
-                pickerDoneLink
+                datePicker(for: .start)
+                pickerDoneLink(for: .start)
             }
 
             dateFieldRow(field: .end, label: "帰着日", date: endDate)
             if activeDateField == .end {
-                DatePicker(
-                    "帰着日",
-                    selection: $endDate,
-                    in: visitDate...,
-                    displayedComponents: .date
-                )
-                .datePickerStyle(.graphical)
-                .tint(.irohaFuji)
-                .environment(\.locale, Locale(identifier: "ja_JP"))
-                .labelsHidden()
-                .id(pickerRefreshId)
-
-                pickerDoneLink
+                datePicker(for: .end)
+                pickerDoneLink(for: .end)
             }
         }
         .padding(.horizontal, 20)
@@ -771,13 +1051,247 @@ struct VisitFormView: View {
                 // いずれも日付グリッドの日タップで自動的に行われる。
                 pickerRefreshId += 1
             } label: {
-                Text("完了")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.irohaFuji)
-                    .padding(.vertical, 4)
-                    .padding(.horizontal, 8)
+                doneLinkLabel
             }
         }
+    }
+
+    /// 旅行日ピッカーの「完了」。精度によって役割が変わる。
+    ///
+    /// - 年月日: 従来どおりグリッドへ戻すリフレッシュのみ（遷移は日タップが担う）
+    /// - 年月 / 年: ホイールには「日タップ」がないので、完了ボタンが遷移を担う
+    private func pickerDoneLink(for field: DateField) -> some View {
+        HStack {
+            Spacer()
+            Button {
+                guard dateAccuracy != .day else {
+                    pickerRefreshId += 1
+                    return
+                }
+                if field == .start {
+                    activeDateField = .end
+                } else {
+                    withAnimation(.easeInOut(duration: 0.25)) { expandedSection = nil }
+                }
+            } label: {
+                doneLinkLabel
+            }
+        }
+    }
+
+    private var doneLinkLabel: some View {
+        Text("完了")
+            .font(.system(size: 14, weight: .medium))
+            .foregroundColor(.irohaFuji)
+            .padding(.vertical, 4)
+            .padding(.horizontal, 8)
+    }
+
+    /// 旅行日の入力粒度セグメント。居住では表示しない（`datePickerContent` 内でのみ使う）。
+    private var accuracySegment: some View {
+        HStack(spacing: 6) {
+            ForEach(DateAccuracy.allCases, id: \.rawValue) { accuracy in
+                let isSelected = dateAccuracy == accuracy
+                Button {
+                    changeAccuracy(to: accuracy)
+                } label: {
+                    Text(accuracy.displayName)
+                        .font(.system(size: 13, weight: isSelected ? .bold : .regular))
+                        .foregroundColor(isSelected ? .white : .irohaSumi2)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                        .background(isSelected ? Color.irohaFujiDk : Color.irohaWashi2)
+                        .clipShape(Capsule())
+                        .overlay(
+                            Capsule().stroke(isSelected ? Color.irohaFujiDk : Color.irohaWashi3,
+                                             lineWidth: 0.5)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.bottom, 4)
+    }
+
+    /// 精度に応じた日付ピッカー。
+    @ViewBuilder
+    private func datePicker(for field: DateField) -> some View {
+        switch dateAccuracy {
+        case .day:   graphicalDatePicker(for: field)
+        case .month: yearMonthWheel(for: field)
+        case .year:  yearWheel(for: field)
+        }
+    }
+
+    /// 年月日モードのカレンダー。精度導入前の実装をそのまま使う。
+    @ViewBuilder
+    private func graphicalDatePicker(for field: DateField) -> some View {
+        switch field {
+        case .start:
+            DatePicker(
+                "開始日",
+                selection: $visitDate,
+                displayedComponents: .date
+            )
+            .datePickerStyle(.graphical)
+            .tint(.irohaFuji)
+            .environment(\.locale, Locale(identifier: "ja_JP"))
+            .labelsHidden()
+            .id(pickerRefreshId)
+            .onChange(of: visitDate) { oldDate, newDate in
+                let calendar = Calendar.current
+                if newDate > endDate {
+                    let duration = calendar.dateComponents([.day], from: oldDate, to: endDate).day ?? 0
+                    skipNextEndDateChange = true
+                    endDate = calendar.date(byAdding: .day, value: max(duration, 0), to: newDate) ?? newDate
+                }
+                // ユーザーの日タップ（同月内 or 横スライド/月送り後）で帰着日へ遷移。
+                // ホイール式年月ピッカーで日が自動調整されたケース（5/31→6/30 等）のみ除外する。
+                if isUserDayTap(from: oldDate, to: newDate) {
+                    activeDateField = .end
+                }
+            }
+        case .end:
+            DatePicker(
+                "帰着日",
+                selection: $endDate,
+                in: visitDate...,
+                displayedComponents: .date
+            )
+            .datePickerStyle(.graphical)
+            .tint(.irohaFuji)
+            .environment(\.locale, Locale(identifier: "ja_JP"))
+            .labelsHidden()
+            .id(pickerRefreshId)
+        }
+    }
+
+    /// 年月モードのホイール。iOS 標準の `DatePicker` に「年月のみ」スタイルがないため自前で組む。
+    private func yearMonthWheel(for field: DateField) -> some View {
+        HStack(spacing: 0) {
+            Picker("年", selection: yearBinding(for: field)) {
+                ForEach(selectableYears, id: \.self) { year in
+                    Text(verbatim: "\(year)年").tag(year)
+                }
+            }
+            .pickerStyle(.wheel)
+            .frame(maxWidth: .infinity)
+
+            Picker("月", selection: monthBinding(for: field)) {
+                ForEach(Self.monthsInYear, id: \.self) { month in
+                    Text(verbatim: "\(month)月").tag(month)
+                }
+            }
+            .pickerStyle(.wheel)
+            .frame(maxWidth: .infinity)
+        }
+        .frame(height: 150)
+        .id(pickerRefreshId)
+    }
+
+    /// 年モードのホイール。
+    private func yearWheel(for field: DateField) -> some View {
+        Picker("年", selection: yearBinding(for: field)) {
+            ForEach(selectableYears, id: \.self) { year in
+                Text(verbatim: "\(year)年").tag(year)
+            }
+        }
+        .pickerStyle(.wheel)
+        .frame(height: 150)
+        .id(pickerRefreshId)
+    }
+
+    // MARK: - 曖昧精度ピッカーの Binding
+    //
+    // `visitDate` / `endDate` (Date) を単一の真実とし、ホイールは Binding<Int> 越しに
+    // 読み書きする。State を年・月に分割して二重管理しない。
+
+    private func date(for field: DateField) -> Date {
+        field == .start ? visitDate : endDate
+    }
+
+    private func yearBinding(for field: DateField) -> Binding<Int> {
+        Binding(
+            get: { Calendar.current.component(.year, from: date(for: field)) },
+            set: { setDateComponent(.year, to: $0, for: field) }
+        )
+    }
+
+    private func monthBinding(for field: DateField) -> Binding<Int> {
+        Binding(
+            get: { Calendar.current.component(.month, from: date(for: field)) },
+            set: { setDateComponent(.month, to: $0, for: field) }
+        )
+    }
+
+    /// 年 or 月だけを差し替え、精度に応じた代表日へ丸めて格納する。
+    private func setDateComponent(_ component: Calendar.Component, to value: Int, for field: DateField) {
+        let calendar = Calendar.current
+        var comps = calendar.dateComponents([.year, .month], from: date(for: field))
+        switch component {
+        case .year:  comps.year = value
+        case .month: comps.month = value
+        default:     return
+        }
+        // 月初で組み立ててから正規化する。日を保ったまま月を差し替えると、
+        // その月に存在しない日 (2月31日 など) が翌月に繰り上がってしまうため
+        // (DateComponents は nil を返さず 2015/2/31 → 2015-03-03 を返す)。
+        comps.day = 1
+        guard let rebuilt = calendar.date(from: comps) else { return }
+        assign(dateAccuracy.normalized(rebuilt), to: field)
+    }
+
+    /// 正規化済みの日付を State に反映する。開始日 ≤ 帰着日 の関係をここで担保する。
+    private func assign(_ newDate: Date, to field: DateField) {
+        switch field {
+        case .start:
+            visitDate = newDate
+            if newDate > endDate {
+                skipNextEndDateChange = true
+                endDate = newDate
+            }
+        case .end:
+            // 曖昧精度では帰着日ピッカーに `in: visitDate...` の制約がない
+            // (ホイールは範囲指定できない) ため、ここでクランプする。
+            skipNextEndDateChange = true
+            endDate = max(newDate, visitDate)
+        }
+    }
+
+    /// 精度を切り替え、既存の日付を新しい精度の代表日へ丸める。
+    ///
+    /// 例: `.day` 2015/5/3 → `.month` → 2015/5/31 → `.year` → 2015/12/31
+    /// 粗い精度から戻しても元の日は復元しない (2015/12/31 のまま)。
+    private func changeAccuracy(to newAccuracy: DateAccuracy) {
+        guard newAccuracy != dateAccuracy else { return }
+        dateAccuracy = newAccuracy
+
+        // 年ホイールの選択肢外の年 (カレンダーは範囲無制限なので入り得る) を先に丸める
+        let clampedStart = clampToSelectableYear(visitDate)
+        let clampedEnd   = clampToSelectableYear(endDate)
+
+        let normalizedStart = newAccuracy.normalized(clampedStart)
+        let normalizedEnd   = max(newAccuracy.normalized(clampedEnd), normalizedStart)
+
+        visitDate = normalizedStart
+        skipNextEndDateChange = true
+        endDate = normalizedEnd
+
+        activeDateField = .start
+        pickerRefreshId += 1
+    }
+
+    /// 年を `selectableYears` の範囲に収める。範囲外なら端の年の同月同日に寄せる。
+    private func clampToSelectableYear(_ date: Date) -> Date {
+        let calendar = Calendar.current
+        let year = calendar.component(.year, from: date)
+        guard let lowest = selectableYears.last, let highest = selectableYears.first,
+              year < lowest || year > highest else {
+            return date
+        }
+        var comps = calendar.dateComponents([.year, .month, .day], from: date)
+        comps.year = min(max(year, lowest), highest)
+        return calendar.date(from: comps) ?? date
     }
 
     private func dateFieldRow(field: DateField, label: String, date: Date) -> some View {
@@ -786,7 +1300,7 @@ struct VisitFormView: View {
                 .font(.system(size: 15))
                 .foregroundColor(.irohaSumi2)
             Spacer()
-            Text(date.formatted(.dateTime.year().month().day().locale(Locale(identifier: "ja_JP"))))
+            Text(VisitDateFormat.text(date, accuracy: effectiveFormAccuracy))
                 .font(.system(size: 15))
                 .foregroundColor(activeDateField == field ? .irohaFuji : .irohaSumi)
         }
@@ -815,25 +1329,33 @@ struct VisitFormView: View {
     }
 
     private var tagPickerContent: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
-            ForEach(VisitTag.selectableCases, id: \.rawValue) { tag in
+        // 編集中の記録が非表示にされたプリセットを使っている場合、そのスタイルだけ
+        // 選択肢に残す。保存し直しただけでスタイルが外れるのを防ぐ。
+        let styles = styleCatalog.selectableIncluding(selectedStyle)
+
+        return LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 6) {
+            ForEach(styles) { style in
+                let isSelected = selectedStyleID == style.id
                 Button {
-                    selectedTag = selectedTag == tag ? .none : tag
+                    // 再タップで選択解除
+                    selectedStyleID = isSelected ? nil : style.id
                 } label: {
                     HStack(spacing: 6) {
-                        Image(systemName: tag.iconName)
+                        Image(systemName: style.iconName)
                             .font(.system(size: 13))
-                        Text(tag.displayName)
-                            .font(.system(size: 14, weight: selectedTag == tag ? .bold : .medium))
+                        Text(style.name)
+                            .font(.system(size: 14, weight: isSelected ? .bold : .medium))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
                     }
-                    .foregroundColor(selectedTag == tag ? tag.foregroundColor : .irohaSumi3)
+                    .foregroundColor(isSelected ? style.foregroundColor : .irohaSumi3)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
-                    .background(selectedTag == tag ? tag.backgroundColor : Color.irohaWashi2)
+                    .background(isSelected ? style.backgroundColor : Color.irohaWashi2)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
-                            .stroke(selectedTag == tag ? tag.foregroundColor.opacity(0.3) : Color.irohaWashi3, lineWidth: 0.5)
+                            .stroke(isSelected ? style.foregroundColor.opacity(0.3) : Color.irohaWashi3, lineWidth: 0.5)
                     )
                 }
             }
@@ -973,11 +1495,15 @@ struct VisitFormView: View {
             .padding(.leading, 58)
     }
 
+    /// - Parameter lineLimit: 値テキストの行数上限。既定 (nil) は無制限。
+    ///   長い値でも折り返して全文を見せたい行 (日付・場所) はそのまま、
+    ///   1 行に収めたい行 (都道府県) だけ 1 を渡す。
     private func rowHeader(
         icon: String,
         label: String,
         value: String,
         valueColor: Color = .irohaSumi,
+        lineLimit: Int? = nil,
         section: FormSection?
     ) -> some View {
         HStack(spacing: 14) {
@@ -995,6 +1521,8 @@ struct VisitFormView: View {
             Text(value)
                 .font(.system(size: 15))
                 .foregroundColor(valueColor)
+                .lineLimit(lineLimit)
+                .truncationMode(.tail)
 
             if let section {
                 chevron(for: section)
@@ -1023,13 +1551,21 @@ struct VisitFormView: View {
     }
 
     private var formattedDateSummary: String {
-        let fmt = { (d: Date) in
-            d.formatted(.dateTime.year().month().day().locale(Locale(identifier: "ja_JP")))
+        // 同日 (精度上で同一) なら単一表示になる出し分けは VisitDateFormat が担当する
+        VisitDateFormat.rangeText(from: visitDate, to: endDate,
+                                  accuracy: effectiveFormAccuracy, separator: "→")
+    }
+
+    /// 行ヘッダ用のサマリ。幅が限られるため `prefectureSummaryLimit` 県までを連結し、
+    /// 超過分は「ほか N 県」に畳む。全県の並びは展開したピッカーのチップで確認できる。
+    private var prefectureSummary: String {
+        guard !selectedPrefectureIDs.isEmpty else { return "選択してください" }
+        let names = selectedPrefectureIDs.compactMap { Prefecture.by(id: $0)?.name }
+        guard names.count > prefectureSummaryLimit else {
+            return names.joined(separator: Visit.prefectureSeparator)
         }
-        if !Calendar.current.isDate(visitDate, inSameDayAs: endDate) {
-            return "\(fmt(visitDate)) → \(fmt(endDate))"
-        }
-        return fmt(visitDate)
+        return names.prefix(prefectureSummaryLimit).joined(separator: Visit.prefectureSeparator)
+            + " ほか\(names.count - prefectureSummaryLimit)県"
     }
 
     private func filteredPrefectures(for region: Region) -> [Prefecture] {
@@ -1044,10 +1580,15 @@ struct VisitFormView: View {
         guard !didPopulate else { return }
         didPopulate = true
         if let visit = editingVisit {
-            selectedPrefectureName = visit.prefectureName
+            selectedPrefectureIDs = visit.effectivePrefectureIDs
+            selectedKind = visit.effectiveKind
             visitDate = visit.startDate
             endDate = visit.effectiveEndDate
-            selectedTag = visit.effectiveTag
+            dateAccuracy = visit.effectiveDateAccuracy
+            isOngoingResidence = visit.isResidenceOngoing
+            // 終了日なし (継続中 or 未設定) の場合は開始日を初期値にする
+            residenceEndDate = visit.residenceEndDate ?? visit.startDate
+            selectedStyleID = visit.effectiveStyleID
             selectedMood = visit.effectiveMood
             selectedTransports = Set(visit.effectiveTransports)
             memo = visit.note
@@ -1064,8 +1605,9 @@ struct VisitFormView: View {
                 }
             }
         } else if let pref = prefecture {
-            selectedPrefectureName = pref.name
-        } else if !isPrefectureLocked && editingVisit == nil {
+            // 県詳細シート由来。初期値として入れるだけでロックはしない
+            selectedPrefectureIDs = [pref.id]
+        } else {
             expandedSection = .prefecture
         }
     }
@@ -1107,40 +1649,79 @@ struct VisitFormView: View {
     private func save() {
         guard !isSaving else { return }
 
+        // 日付精度に応じた代表日へ正規化してから保存する。丸めはここ 1 箇所に集約し、
+        // 読み出し側は「startDate は既に代表日」と信頼する。
+        let accuracy = effectiveFormAccuracy
+        let normalizedStartDate = accuracy.normalized(visitDate)
+        // 旅行: endDate は「同日なら nil (= 日帰り)」。居住では使わない。
+        // 居住: 期間は residenceEndDate / isResidenceOngoing 側に持たせる。
         let computedEndDate: Date? = {
-            Calendar.current.isDate(endDate, inSameDayAs: visitDate) ? nil : endDate
+            guard !isResidenceMode else { return nil }
+            let normalizedEndDate = accuracy.normalized(endDate)
+            // 精度上で同一なら畳む (年月精度なら「同じ月」で日帰り扱い)
+            return accuracy.isSame(normalizedStartDate, normalizedEndDate) ? nil : normalizedEndDate
         }()
-        let resolvedPrefectureID = Prefecture.by(name: selectedPrefectureName)?.id ?? 0
+        let computedResidenceEndDate: Date? = {
+            guard isResidenceMode, !isOngoingResidence else { return nil }
+            return residenceEndDate
+        }()
+        let computedIsOngoing = isResidenceMode && isOngoingResidence
+        // 旅行スタイル・移動手段・ムード・旅行名は旅行専用。
+        // 居住では入力欄を出さないので保存もしない (種別を切り替えたときに
+        // 見えていない値が残らないよう、明示的にクリアする)。
+        let computedTag: String? = isResidenceMode ? nil : selectedStyleID
+        let computedMood: VisitMood = isResidenceMode ? .none : selectedMood
+        let computedTransports = isResidenceMode ? [] : selectedTransports.map(\.rawValue)
+        let computedTripName = isResidenceMode ? "" : tripName
+        // 日付精度も旅行専用 (居住は年月粒度の専用表示を持つ)
+        let computedDateAccuracy: DateAccuracy = isResidenceMode ? .day : dateAccuracy
+        // 複数県は旅行専用。居住は先頭 1 県に切り詰める (UI 側でも単一選択にしているが、
+        // 種別を切り替えた直後の取りこぼしを防ぐ保険)。
+        let computedPrefectureIDs = isResidenceMode
+            ? Array(selectedPrefectureIDs.prefix(1))
+            : selectedPrefectureIDs
+        // 旧 prefectureID / prefectureName には先頭県をミラーする
+        let primaryPrefectureID = computedPrefectureIDs.first ?? 0
+        let primaryPrefectureName = Prefecture.by(id: primaryPrefectureID)?.name ?? ""
 
         // メタデータ更新 (Visit を確保)
         let visit: Visit
         if let existing = editingVisit {
             visit = existing
-            visit.prefectureName = selectedPrefectureName
-            visit.prefectureID = resolvedPrefectureID
-            visit.startDate = visitDate
+            // kind を先に確定させる (setPrefectureIDs が居住なら 1 県に切り詰めるため)
+            visit.kind = selectedKind
+            visit.setPrefectureIDs(computedPrefectureIDs)
+            visit.startDate = normalizedStartDate
             visit.endDate = computedEndDate
-            visit.tag = selectedTag
-            visit.mood = selectedMood
-            visit.transports = selectedTransports.map(\.rawValue)
+            visit.dateAccuracy = computedDateAccuracy
+            visit.residenceEndDate = computedResidenceEndDate
+            visit.isResidenceOngoing = computedIsOngoing
+            visit.setStyleID(computedTag)
+            visit.mood = computedMood
+            visit.transports = computedTransports
             visit.note = memo
-            visit.tripName = tripName
+            visit.tripName = computedTripName
             visit.companions = companions
             visit.location = location
             visit.locationLatitude = locationLatitude
             visit.locationLongitude = locationLongitude
         } else {
             let newVisit = Visit(
-                prefectureName: selectedPrefectureName,
-                prefectureID: resolvedPrefectureID,
-                startDate: visitDate,
+                prefectureName: primaryPrefectureName,
+                prefectureID: primaryPrefectureID,
+                prefectureIDs: computedPrefectureIDs,
+                startDate: normalizedStartDate,
                 endDate: computedEndDate,
                 note: memo,
-                tag: selectedTag
+                styleID: computedTag,
+                kind: selectedKind,
+                residenceEndDate: computedResidenceEndDate,
+                isResidenceOngoing: computedIsOngoing,
+                dateAccuracy: computedDateAccuracy
             )
-            newVisit.mood = selectedMood
-            newVisit.transports = selectedTransports.map(\.rawValue)
-            newVisit.tripName = tripName
+            newVisit.mood = computedMood
+            newVisit.transports = computedTransports
+            newVisit.tripName = computedTripName
             newVisit.companions = companions
             newVisit.location = location
             newVisit.locationLatitude = locationLatitude

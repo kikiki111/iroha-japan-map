@@ -13,12 +13,12 @@
 - アーキテクチャ: MVVM + @Observable
 
 ## ファイル構成
-Iroha/Models/ — @Model クラス（Visit, VisitPhoto）+ static struct（Prefecture）+ enum（Region, VisitTag, VisitMood, VisitTransport, Badge/BadgeCategory/TravelerTier）+ struct（Trip）
+Iroha/Models/ — @Model クラス（Visit, VisitPhoto, TravelStyleRecord）+ static struct（Prefecture）+ enum（Region, VisitKind, DateAccuracy, TravelStylePreset, TravelStylePalette, TravelStyleIcon, VisitMood, VisitTransport, Badge/BadgeCategory/TravelerTier）+ struct（Trip, TravelStyle）
 Iroha/ViewModels/ — @Observable クラス（MapViewModel）
 Iroha/Views/ — SwiftUI View（CloudSyncOnboardingView 含む）
-Iroha/Views/Components/ — 再利用可能な小コンポーネント（NurikakeNumber, VisitMoodBadge, VisitTagBadge, VisitTransportBadge, VisitCompanionBadge, BadgeCollectionView, BadgeStampView, LocationSearchCompleter, SakuraEffectView）
-Iroha/Services/ — ビジネスロジック（TripDetector, PhotoStorageManager, VisitPhotoStore, VisitPrefectureMigration, PhotoMigration, CloudSyncStatusObserver）
-Iroha/Utilities/ — ヘルパー（PrefectureColor, VisitStats, ShareManager, DistanceCalculator）
+Iroha/Views/Components/ — 再利用可能な小コンポーネント（NurikakeNumber, VisitMoodBadge, VisitTagBadge, VisitTransportBadge, VisitCompanionBadge, VisitResidenceBadge, BadgeCollectionView, BadgeStampView, LocationSearchCompleter, SakuraEffectView, SettingsComponents）
+Iroha/Services/ — ビジネスロジック（TripDetector, PhotoStorageManager, VisitPhotoStore, VisitPrefectureMigration, PhotoMigration, CloudSyncStatusObserver, CompanionSuggestionStore, TravelStyleStore）
+Iroha/Utilities/ — ヘルパー（PrefectureColor, VisitStats, ShareManager, DistanceCalculator, TravelStyleCatalog, VisitDateFormat）
 Iroha/Resources/ — SVG・アセット
 
 ## 禁止事項

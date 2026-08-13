@@ -461,19 +461,36 @@ enum Badge: String, CaseIterable, Identifiable {
 
     private static let landlockedIDs: Set<Int> = [9, 10, 11, 19, 20, 21, 25, 29]
 
+    /// 写真がある記録に登場した都道府県 ID 集合 (1 レコード複数県対応)。
+    private static func prefectureIDsWithPhotos(_ visits: [Visit]) -> Set<Int> {
+        Set(visits.filter(\.hasPhotos).flatMap(\.effectivePrefectureIDs))
+    }
+
     func isEarned(visits: [Visit], stats: VisitStats) -> Bool {
+        // 「旅の回数・日数」を数える実績からは居住記録を除外する。
+        // 居住は期間が数年に及ぶため、含めると件数が水増しされ、
+        // `nightOwl` (累計 10 泊) は居住 1 件で即達成してしまう。
+        // 写真・メモ・ムード系は居住記録の分も実績に含めてよいので `visits` のまま。
+        let travelVisits = visits.filter { !$0.isResidence }
+        // 月が確定している旅行記録。四季 (`fourSeasons` / `samePrefFourSeasons`) と
+        // 12 ヶ月 (`yearRoundTraveler`) の判定に使う。`.month` は代表日こそ月末だが
+        // 月成分は正しいので対象に含め、`.year` (月不明) だけを落とす。
+        let monthKnownVisits = travelVisits.filter { $0.effectiveDateAccuracy.hasMonth }
+        // 日まで確定している旅行記録。日数差を測る `thousandDays` に使う。
+        let dayKnownVisits = travelVisits.filter { !$0.isDateAmbiguous }
+
         switch self {
 
         // ── Tier 1: 初心者 ──
 
         case .firstVisit:
-            return !visits.isEmpty
+            return !travelVisits.isEmpty
 
         case .tenVisits:
-            return visits.count >= 10
+            return travelVisits.count >= 10
 
         case .fiftyVisits:
-            return visits.count >= 50
+            return travelVisits.count >= 50
 
         case .nationalConquest:
             return stats.visitedCount >= 47
@@ -483,7 +500,7 @@ enum Badge: String, CaseIterable, Identifiable {
 
         case .fourSeasons:
             let calendar = Calendar.current
-            let months = Set(visits.map { calendar.component(.month, from: $0.startDate) })
+            let months = Set(monthKnownVisits.map { calendar.component(.month, from: $0.startDate) })
             let spring = months.contains(where: { (3...5).contains($0) })
             let summer = months.contains(where: { (6...8).contains($0) })
             let autumn = months.contains(where: { (9...11).contains($0) })
@@ -491,8 +508,12 @@ enum Badge: String, CaseIterable, Identifiable {
             return spring && summer && autumn && winter
 
         case .threeStyles:
-            let tags = Set(visits.map(\.effectiveTag)).subtracting([.none, .dayTrip, .stay, .lived])
-            return tags.count >= 3
+            // ID ベースで数える。カタログを引かないのは判定を純粋関数に保つためで、
+            // プリセットもユーザー定義も等しく 1 スタイルとして扱う。
+            // 未選択は effectiveStyleID が nil を返すので compactMap で落ちる。
+            let styleIDs = Set(visits.compactMap(\.effectiveStyleID))
+                .subtracting(TravelStylePreset.legacyIDs)
+            return styleIDs.count >= 3
 
         case .landlocked:
             return Self.landlockedIDs.isSubset(of: stats.visitedIDs)
@@ -513,10 +534,10 @@ enum Badge: String, CaseIterable, Identifiable {
         // ── Tier 2: 中級者 ──
 
         case .thirtyVisits:
-            return visits.count >= 30
+            return travelVisits.count >= 30
 
         case .hundredVisits:
-            return visits.count >= 100
+            return travelVisits.count >= 100
 
         case .twentyPrefectures:
             return stats.visitedCount >= 20
@@ -530,7 +551,7 @@ enum Badge: String, CaseIterable, Identifiable {
 
         case .samePrefFourSeasons:
             let calendar = Calendar.current
-            let grouped = Dictionary(grouping: visits, by: \.prefectureName)
+            let grouped = VisitStats.groupedByPrefectureID(monthKnownVisits)
             return grouped.values.contains { prefVisits in
                 let months = Set(prefVisits.map { calendar.component(.month, from: $0.startDate) })
                 let spring = months.contains(where: { (3...5).contains($0) })
@@ -548,14 +569,13 @@ enum Badge: String, CaseIterable, Identifiable {
             return visits.contains(where: \.hasCompanions) && visits.contains(where: { !$0.hasCompanions })
 
         case .tenPhotoPrefectures:
-            let prefsWithPhotos = Set(visits.filter(\.hasPhotos).map(\.prefectureName))
-            return prefsWithPhotos.count >= 10
+            return Self.prefectureIDsWithPhotos(visits).count >= 10
 
         case .threeHundredPhotos:
             return visits.reduce(0) { $0 + $1.totalPhotoCount } >= 300
 
         case .moodGeography:
-            let grouped = Dictionary(grouping: visits, by: \.prefectureName)
+            let grouped = VisitStats.groupedByPrefectureID(visits)
             let qualifying = grouped.values.filter { prefVisits in
                 Set(prefVisits.map(\.effectiveMood).filter { $0 != .none }).count >= 2
             }
@@ -567,36 +587,32 @@ enum Badge: String, CaseIterable, Identifiable {
         // ── Tier 3: 上級者 ──
 
         case .twoHundredVisits:
-            return visits.count >= 200
+            return travelVisits.count >= 200
 
         case .thirtyFivePrefectures:
             return stats.visitedCount >= 35
 
         case .repeatVisitor:
-            let grouped = Dictionary(grouping: visits, by: \.prefectureName)
+            let grouped = VisitStats.groupedByPrefectureID(travelVisits)
             let repeats = grouped.values.filter { $0.count >= 3 }
             return repeats.count >= 5
 
         case .longJourney:
+            // 日付が曖昧な旅は nightCount が nil になり、対象から外れる
+            // (例: 年月精度の「5月〜6月」は代表日の差が 30 日あるが実際の泊数は不明)
             let trips = TripDetector.detect(from: visits)
-            let calendar = Calendar.current
-            return trips.contains { trip in
-                let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: trip.startDate),
-                                                   to: calendar.startOfDay(for: trip.endDate)).day ?? 0
-                return days >= 7
-            }
+            return trips.contains { ($0.nightCount ?? 0) >= 7 }
 
         case .fiveRegions:
             return Region.allCases.filter { stats.isRegionConquered($0) }.count >= 5
 
         case .nightOwl:
-            let calendar = Calendar.current
-            let totalNights = visits.compactMap { visit -> Int? in
-                let start = calendar.startOfDay(for: visit.startDate)
-                let end = calendar.startOfDay(for: visit.effectiveEndDate)
-                let nights = calendar.dateComponents([.day], from: start, to: end).day ?? 0
-                return nights > 0 ? nights : nil
-            }.reduce(0, +)
+            // `nightCount` は居住と日付が曖昧な記録で nil を返すため、compactMap で自然に落ちる。
+            // (居住を含めると 1 件・数年で即達成してしまう)
+            let totalNights = travelVisits
+                .compactMap(\.nightCount)
+                .filter { $0 > 0 }
+                .reduce(0, +)
             return totalNights >= 10
 
         case .allTransports:
@@ -611,8 +627,7 @@ enum Badge: String, CaseIterable, Identifiable {
             return hasHokkaido && hasShikoku && hasKyushu && hasOkinawa
 
         case .twentyPhotoPrefectures:
-            let prefsWithPhotos = Set(visits.filter(\.hasPhotos).map(\.prefectureName))
-            return prefsWithPhotos.count >= 20
+            return Self.prefectureIDsWithPhotos(visits).count >= 20
 
         case .fiveHundredPhotos:
             return visits.reduce(0) { $0 + $1.totalPhotoCount } >= 500
@@ -627,14 +642,15 @@ enum Badge: String, CaseIterable, Identifiable {
         // ── Tier 4: 達人 ──
 
         case .fiveHundredVisits:
-            return visits.count >= 500
+            return travelVisits.count >= 500
 
         case .allFortySevenAgain:
             return Prefecture.all.allSatisfy { stats.count(for: $0) >= 2 }
 
         case .thousandDays:
-            guard let earliest = visits.map(\.startDate).min(),
-                  let latest = visits.map(\.startDate).max() else { return false }
+            // 日単位の差を測るので、代表日に丸められた曖昧な記録は除外する
+            guard let earliest = dayKnownVisits.map(\.startDate).min(),
+                  let latest = dayKnownVisits.map(\.startDate).max() else { return false }
             let days = Calendar.current.dateComponents([.day], from: earliest, to: latest).day ?? 0
             return days >= 1000
 
@@ -647,21 +663,20 @@ enum Badge: String, CaseIterable, Identifiable {
 
         case .yearRoundTraveler:
             let calendar = Calendar.current
-            let months = Set(visits.map { calendar.component(.month, from: $0.startDate) })
+            let months = Set(monthKnownVisits.map { calendar.component(.month, from: $0.startDate) })
             return months.count >= 12
 
         case .slowTraveler:
             let slowPrefs = Set(visits.filter { visit in
                 visit.effectiveTransports.contains(.bicycle) || visit.effectiveTransports.contains(.walking)
-            }.map(\.prefectureName))
+            }.flatMap(\.effectivePrefectureIDs))
             return slowPrefs.count >= 5
 
         case .namedTrips:
             return visits.filter { !$0.tripName.isEmpty }.count >= 10
 
         case .allPrefecturePhotos:
-            let prefsWithPhotos = Set(visits.filter(\.hasPhotos).map(\.prefectureName))
-            return prefsWithPhotos.count >= 47
+            return Self.prefectureIDsWithPhotos(visits).count >= 47
 
         case .thousandPhotos:
             return visits.reduce(0) { $0 + $1.totalPhotoCount } >= 1000

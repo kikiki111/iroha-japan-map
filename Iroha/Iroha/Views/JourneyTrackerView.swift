@@ -33,9 +33,31 @@ struct JourneyTrackerView: View {
         return Set(visits.map { calendar.component(.year, from: $0.startDate) }).sorted(by: >)
     }
 
+    /// 旅行記録のみ（旅数・距離・最遠地などの集計はすべてこちら起点）
+    private var travelVisits: [Visit] {
+        visits.filter { !$0.isResidence }
+    }
+
     private var filteredVisits: [Visit] {
-        if selectedYear == 0 { return Array(visits) }
-        return visits.filter { Calendar.current.component(.year, from: $0.startDate) == selectedYear }
+        if selectedYear == 0 { return travelVisits }
+        return travelVisits.filter { Calendar.current.component(.year, from: $0.startDate) == selectedYear }
+    }
+
+    /// 選択中の期間に住みはじめた県の数（「すべて」選択時は全期間）
+    private var filteredResidenceCount: Int {
+        let residences = visits.filter(\.isResidence)
+        if selectedYear == 0 {
+            return Set(residences.map(\.prefectureID)).count
+        }
+        let inYear = residences.filter {
+            Calendar.current.component(.year, from: $0.startDate) == selectedYear
+        }
+        return Set(inYear.map(\.prefectureID)).count
+    }
+
+    /// 居住したことのある都道府県 ID（地方別リストの家アイコン用、期間フィルタなし）
+    private var residencePrefectureIDs: Set<Int> {
+        Set(visits.filter(\.isResidence).map(\.prefectureID))
     }
 
     private var filteredTotalVisits: Int { filteredVisits.count }
@@ -236,13 +258,14 @@ struct JourneyTrackerView: View {
         let sorted = filteredVisits.sorted { $0.startDate < $1.startDate }
         let calendar = Calendar.current
         let range = chartDateRange
-        var seen = Set<String>()
+        var seen = Set<Int>()
         var cumulative = 0
         var points: [JourneyDataPoint] = [JourneyDataPoint(date: range.start, count: 0)]
 
         for visit in sorted {
             guard visit.startDate >= range.start, visit.startDate <= range.end else { continue }
-            if seen.insert(visit.prefectureName).inserted {
+            // 1 レコードに複数県があると同じ日に複数段上がる
+            for id in visit.effectivePrefectureIDs where seen.insert(id).inserted {
                 cumulative += 1
             }
             let day = calendar.startOfDay(for: visit.startDate)
@@ -265,7 +288,7 @@ struct JourneyTrackerView: View {
     }
 
     private func filteredVisitCount(for prefecture: Prefecture) -> Int {
-        filteredVisits.filter { $0.prefectureName == prefecture.name }.count
+        filteredVisits.filter { $0.effectivePrefectureIDs.contains(prefecture.id) }.count
     }
 
     // MARK: - Year highlights
@@ -275,27 +298,31 @@ struct JourneyTrackerView: View {
     }
 
     private var newPrefectureCountInYear: Int {
-        let currentNames = Set(filteredVisits.map(\.prefectureName))
-        guard selectedYear > 0 else { return currentNames.count }
+        let currentIDs = Set(filteredVisits.flatMap(\.effectivePrefectureIDs))
+        guard selectedYear > 0 else { return currentIDs.count }
         let beforeYear = visits.filter {
             Calendar.current.component(.year, from: $0.startDate) < selectedYear
         }
-        let previousNames = Set(beforeYear.map(\.prefectureName))
-        return currentNames.subtracting(previousNames).count
+        let previousIDs = Set(beforeYear.flatMap(\.effectivePrefectureIDs))
+        return currentIDs.subtracting(previousIDs).count
     }
 
     private var filteredConqueredRegionCount: Int {
-        let visitedNames = Set(filteredVisits.map(\.prefectureName))
+        // 居住県も「訪れた」に含める（地図・統計バーと同じ扱い）
+        let residenceIDs = residencePrefectureIDs
+        let visitedIDs = Set(filteredVisits.flatMap(\.effectivePrefectureIDs))
         return Region.allCases.filter { region in
             let group = prefectures.filter { $0.region == region }
-            return !group.isEmpty && group.allSatisfy { visitedNames.contains($0.name) }
+            return !group.isEmpty && group.allSatisfy {
+                visitedIDs.contains($0.id) || residenceIDs.contains($0.id)
+            }
         }.count
     }
 
     private var mostVisitedInPeriod: (prefecture: Prefecture, count: Int)? {
-        let grouped = Dictionary(grouping: filteredVisits, by: \.prefectureName)
+        let grouped = VisitStats.groupedByPrefectureID(filteredVisits)
         guard let top = grouped.max(by: { $0.value.count < $1.value.count }),
-              let pref = prefectures.first(where: { $0.name == top.key }) else { return nil }
+              let pref = prefectures.first(where: { $0.id == top.key }) else { return nil }
         return (pref, top.value.count)
     }
 
@@ -320,9 +347,9 @@ struct JourneyTrackerView: View {
     }
 
     private var farthestPrefecture: Prefecture? {
-        let visitedNames = Set(filteredVisits.map(\.prefectureName))
+        let visitedIDs = Set(filteredVisits.flatMap(\.effectivePrefectureIDs))
         return prefectures
-            .filter { visitedNames.contains($0.name) }
+            .filter { visitedIDs.contains($0.id) }
             .max { distanceFromTokyo($0) < distanceFromTokyo($1) }
     }
 
@@ -404,7 +431,9 @@ struct JourneyTrackerView: View {
                     highlightRow(
                         icon: "airplane.departure",
                         label: "初旅",
-                        value: "\(firstVisit.startDate.formatted(.dateTime.year().month().day().locale(Locale(identifier: "ja_JP")))) \u{00B7} \(firstVisit.prefectureName)",
+                        // 日付と同居する 1 行なので 1 県 +「ほか N 県」に留める
+                        // (2 県連結だと幅が足りず末尾が切り詰められて件数が読めない)
+                        value: "\(VisitDateFormat.startText(firstVisit)) \u{00B7} \(firstVisit.prefectureDisplayName(limit: 1))",
                         thumbnail: firstVisit.sortedPhotoThumbnails.first
                     ) {
                         highlightTrip = firstTrip
@@ -417,7 +446,7 @@ struct JourneyTrackerView: View {
                 // 最遠地
                 if let farthest = farthestPrefecture, farthestDistance > 0 {
                     let farthestVisit = filteredVisits
-                        .filter { $0.prefectureName == farthest.name }
+                        .filter { $0.effectivePrefectureIDs.contains(farthest.id) }
                         .min { $0.startDate < $1.startDate }
                     highlightRow(
                         icon: "mappin.and.ellipse",
@@ -458,7 +487,7 @@ struct JourneyTrackerView: View {
                 // 最多
                 if let top = mostVisitedInPeriod, top.count >= 1 {
                     let topVisit = filteredVisits
-                        .filter { $0.prefectureName == top.prefecture.name }
+                        .filter { $0.effectivePrefectureIDs.contains(top.prefecture.id) }
                         .max { $0.startDate < $1.startDate }
                     highlightRow(
                         icon: "heart.fill",
@@ -506,6 +535,7 @@ struct JourneyTrackerView: View {
                 Text(value)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.irohaSumi)
+                    .lineLimit(1)
 
                 Spacer()
 
@@ -636,6 +666,13 @@ struct JourneyTrackerView: View {
             profileColumn(value: filteredTotalVisits, label: "記録数")
             Divider().frame(height: 40)
             profileColumn(value: filteredTripCount, label: "旅数")
+            // 居住が 1 件もないユーザーには列を出さない（従来の 3 列のまま）
+            if filteredResidenceCount > 0 {
+                Divider().frame(height: 40)
+                // 他の列と同じ書式のまま、色だけ金茶にして区別する
+                profileColumn(value: filteredResidenceCount, label: "住んだ県",
+                              valueColor: .irohaSumikaDk)
+            }
             Divider().frame(height: 40)
             profileColumn(value: filteredConqueredRegionCount, label: "地方制覇")
         }
@@ -650,11 +687,12 @@ struct JourneyTrackerView: View {
         .padding(.top, 10)
     }
 
-    private func profileColumn(value: Int, label: String) -> some View {
+    private func profileColumn(value: Int, label: String,
+                               valueColor: Color = .irohaFujiDk) -> some View {
         VStack(spacing: 3) {
             Text(verbatim: "\(value)")
                 .font(.system(size: 22, weight: .light, design: .serif))
-                .foregroundColor(.irohaFujiDk)
+                .foregroundColor(valueColor)
             Text(label)
                 .font(.system(size: 11))
                 .foregroundColor(.irohaSumi3)
@@ -675,22 +713,33 @@ struct JourneyTrackerView: View {
 
             VStack(spacing: 0) {
                 ForEach(Region.allCases) { region in
+                    let residenceIDs = residencePrefectureIDs
                     let group = prefectures.filter { $0.region == region }
                     let total = group.count
-                    let visitedInPeriod = group.filter { filteredVisitCount(for: $0) > 0 }.count
+                    // 居住県も「その地方を訪れた」に含める（地図・統計バーと同じ扱い）
+                    let visitedInPeriod = group.filter {
+                        filteredVisitCount(for: $0) > 0 || residenceIDs.contains($0.id)
+                    }.count
                     let ratio = total > 0 ? Double(visitedInPeriod) / Double(total) : 0.0
 
                     DisclosureGroup {
                         VStack(spacing: 0) {
                             ForEach(group) { pref in
                                 let count = filteredVisitCount(for: pref)
+                                let isResidence = residenceIDs.contains(pref.id)
                                 HStack(spacing: 8) {
-                                    Image(systemName: count > 0 ? "checkmark.circle.fill" : "circle")
+                                    Image(systemName: (count > 0 || isResidence) ? "checkmark.circle.fill" : "circle")
                                         .font(.system(size: 13))
-                                        .foregroundColor(count > 0 ? .irohaFuji : .irohaSumi3.opacity(0.4))
+                                        .foregroundColor((count > 0 || isResidence) ? .irohaFuji : .irohaSumi3.opacity(0.4))
                                     Text(pref.name)
                                         .font(.system(size: 13))
                                         .foregroundColor(.irohaSumi)
+                                    if isResidence {
+                                        Image(systemName: "house.fill")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.irohaSumika)
+                                            .accessibilityLabel("住んだ県")
+                                    }
                                     Spacer()
                                     if count > 0 {
                                         Text(verbatim: "\(count)回")

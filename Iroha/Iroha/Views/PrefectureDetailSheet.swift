@@ -13,6 +13,7 @@ struct PrefectureDetailSheet: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.travelStyleCatalog) private var styleCatalog
 
     @Query(sort: \Visit.startDate, order: .reverse) private var allVisits: [Visit]
 
@@ -26,10 +27,21 @@ struct PrefectureDetailSheet: View {
     @State private var showPhotoLoadError = false
 
     private var sortedVisits: [Visit] {
-        allVisits.filter { $0.prefectureID == prefecture.id }
+        // この県を含むすべての記録。複数県の記録は各県のシートに同じものが現れる。
+        allVisits.filter { $0.effectivePrefectureIDs.contains(prefecture.id) }
     }
 
-    private var visitCount: Int { sortedVisits.count }
+    /// 旅行記録のみ（訪問回数・訪問履歴はこちらを使う）
+    private var travelVisits: [Visit] {
+        sortedVisits.filter { !$0.isResidence }
+    }
+
+    /// 居住記録のみ（新しい順）
+    private var residenceVisits: [Visit] {
+        sortedVisits.filter(\.isResidence)
+    }
+
+    private var visitCount: Int { travelVisits.count }
 
     private var allPhotoItems: [(visit: Visit, identifier: String, thumbnail: Data)] {
         sortedVisits.flatMap { visit in
@@ -42,6 +54,7 @@ struct PrefectureDetailSheet: View {
             ScrollView {
                 VStack(spacing: 0) {
                     headerSection
+                    residenceSection
                     photoGallery
                     recordButtonsRow
                     visitList
@@ -66,7 +79,10 @@ struct PrefectureDetailSheet: View {
                 .presentationDetents([.large])
                 .environment(\.locale, Locale(identifier: "ja_JP"))
             }
-            .alert("旅行記録を削除しますか？", isPresented: $showDeleteConfirmation) {
+            .alert(
+                visitToDelete?.isResidence == true ? "住んだ記録を削除しますか？" : "旅行記録を削除しますか？",
+                isPresented: $showDeleteConfirmation
+            ) {
                 Button("キャンセル", role: .cancel) {}
                 Button("削除", role: .destructive) {
                     if let visit = visitToDelete {
@@ -185,6 +201,75 @@ struct PrefectureDetailSheet: View {
         .border(width: 0.5, edges: [.bottom], color: Color.irohaSumi.opacity(0.07))
     }
 
+    // MARK: - Residence section
+
+    /// 居住記録は訪問履歴とは別枠で、県名のすぐ下に期間を並べる。
+    @ViewBuilder
+    private var residenceSection: some View {
+        let residences = residenceVisits
+        if !residences.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                // 「写真」セクション見出しと同じ書式に揃える
+                Text("住んでいた期間")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.irohaSumi3)
+                    .tracking(1)
+                    .padding(.horizontal, 20)
+
+                VStack(spacing: 0) {
+                    ForEach(Array(residences.enumerated()), id: \.element.id) { index, visit in
+                        Button {
+                            editingVisit = visit
+                        } label: {
+                            HStack(spacing: 8) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    // 訪問カードの日付 (15pt bold) と同じ書式。色だけ金茶。
+                                    Text(visit.residencePeriodText)
+                                        .font(.system(size: 15, weight: .bold))
+                                        .foregroundColor(.irohaSumikaDk)
+                                    HStack(spacing: 6) {
+                                        if let duration = visit.residenceDurationText {
+                                            Text(duration)
+                                                .font(.system(size: 11))
+                                                .foregroundColor(.irohaSumi3)
+                                        }
+                                        if visit.hasLocation {
+                                            Text(visit.location)
+                                                .font(.system(size: 11))
+                                                .foregroundColor(.irohaSumi2)
+                                                .lineLimit(1)
+                                        }
+                                    }
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundColor(.irohaSumi3.opacity(0.5))
+                            }
+                            .padding(.vertical, 8)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+
+                        if index < residences.count - 1 {
+                            Divider()
+                        }
+                    }
+                }
+                .padding(.horizontal, 14)
+                .background(Color.irohaWashi2.opacity(0.6))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.irohaWashi3, lineWidth: 0.5)
+                )
+                .padding(.horizontal, 20)
+            }
+            .padding(.top, 12)
+            .padding(.bottom, 4)
+        }
+    }
+
     // MARK: - Photo gallery
 
     @ViewBuilder
@@ -233,7 +318,11 @@ struct PrefectureDetailSheet: View {
 
     private var todayVisit: Visit? {
         let calendar = Calendar.current
-        return sortedVisits.first { calendar.isDateInToday($0.startDate) }
+        // 日付が曖昧な記録は除外。代表日がたまたま今日と一致しただけで
+        // (例: 12/31 に「今年」の年のみ記録がある) 「今日の記録を編集」に化けてしまう。
+        return travelVisits.first {
+            !$0.isDateAmbiguous && calendar.isDateInToday($0.startDate)
+        }
     }
 
     private var recordButtonsRow: some View {
@@ -326,11 +415,12 @@ struct PrefectureDetailSheet: View {
     // MARK: - Visit list
 
     private var visitList: some View {
-        LazyVStack(spacing: 0) {
-            ForEach(Array(sortedVisits.enumerated()), id: \.element.id) { index, visit in
+        let visits = travelVisits
+        return LazyVStack(spacing: 0) {
+            ForEach(Array(visits.enumerated()), id: \.element.id) { index, visit in
                 visitCard(visit: visit, index: index)
                     .padding(.horizontal, 20)
-                if index < sortedVisits.count - 1 {
+                if index < visits.count - 1 {
                     Divider()
                         .padding(.leading, 40)
                         .padding(.trailing, 20)
@@ -350,17 +440,23 @@ struct PrefectureDetailSheet: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(visit.startDate.formatted(.dateTime.year().month().day().locale(Locale(identifier: "ja_JP"))))
+                    Text(VisitDateFormat.startText(visit))
                         .font(.system(size: 15, weight: .bold))
 
-                    if visit.effectiveTag != .none {
-                        VisitTagBadge(tag: visit.effectiveTag)
-                    }
+                    VisitTagBadge(style: styleCatalog.style(for: visit))
                     if visit.effectiveMood != .none {
                         VisitMoodBadge(mood: visit.effectiveMood)
                     }
                     VisitTransportBadge(transports: visit.effectiveTransports)
                     VisitCompanionBadge(companions: visit.companions)
+                }
+
+                // 複数県の記録は、この県以外も含むことが分かるよう経路を添える
+                if visit.effectivePrefectureIDs.count > 1 {
+                    Text(visit.prefectureDisplayName)
+                        .font(.system(size: 11))
+                        .foregroundColor(.irohaSumi3)
+                        .lineLimit(1)
                 }
 
                 if visit.hasLocation {
